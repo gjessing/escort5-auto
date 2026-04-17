@@ -1,0 +1,6 @@
+.env
+node_modules/
+google-credentials-dk.json
+billeder/
+backlink-taeller.json
+*.log
