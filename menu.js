@@ -30,7 +30,9 @@ async function main() {
   console.log('  5. Se top sogeord fra Search Console');
   console.log('  6. Hent billeder fra en hjemmeside');
   console.log('  7. Find manglende byer til blog indlaeg');
-  console.log('  8. Afslut');
+  console.log('  8. Ret gamle artikler/blogs (H1 + dato)');
+  console.log('  9. Administrer log (genbehandl artikler)');
+  console.log('  10. Afslut');
   console.log('');
 
   const valg = await sporg('Vaelg en mulighed (1-7): ');
@@ -93,7 +95,22 @@ async function main() {
       break;
     }
 
-    case '8':
+    case '8': {
+      console.log('');
+      const type = await sporg('Type (artikel/blog/ordbog/alle, standard: alle): ') || 'alle';
+      const max  = await sporg('Max antal at behandle (standard: alle): ') || '999';
+      const dry  = await sporg('Dry-run - vis kun hvad der ville ske? (j/n): ') || 'n';
+      const dryFlag = dry.toLowerCase() === 'j' ? '--dry' : '';
+      kor(`node ret-gamle.js --type ${type} --max ${max} ${dryFlag}`);
+      break;
+    }
+
+    case '9': {
+      kor('node log-menu.js');
+      break;
+    }
+
+    case '10':
       console.log('\nFarvel!\n');
       process.exit(0);
 
