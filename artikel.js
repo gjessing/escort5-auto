@@ -13,7 +13,8 @@ const args = minimist(process.argv.slice(2));
 const BY      = args.by   || args.b || null;
 const EMNE    = args.emne || args.e || null;
 const EXTRA   = args.extra || '';
-const HEADLESS = args.headless === true;
+const erLinuxServer = process.platform === 'linux' && !process.env.DISPLAY;
+const HEADLESS = args.headless === true || erLinuxServer;
 const BLOG = args.blog === true;
 
 if (!BY || !EMNE) {
