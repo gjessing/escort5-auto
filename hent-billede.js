@@ -3,17 +3,19 @@
 // Brug: node hent-billede.js --url "https://example.com" --mappe "escort"
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-process.emitWarning = (warning, ...args) => { if (String(warning).includes('NODE_TLS')) return; require('events').EventEmitter.prototype.emit.call(process, 'warning', warning, ...args); };
+process.emitWarning = (warning, ...args) => { if (String(warning).includes('NODE_TLS')) return; };
+
 import 'dotenv/config';
 import { chromium } from 'playwright';
-import { writeFileSync, mkdirSync, existsSync } from 'fs';
+import { writeFileSync, mkdirSync, existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 import minimist from 'minimist';
 import * as readline from 'readline';
 
 const args = minimist(process.argv.slice(2));
-const URL_ARG = args.url   || args.u || null;
+const URL_ARG = args.url || args.u || null;
 const MAPPE   = args.mappe || args.m || 'generelle';
+const CROP_PCT = args.crop || 3;
 
 if (!URL_ARG) {
   console.error('\nMangler URL!');
@@ -27,12 +29,32 @@ function sporg(sporgsmaal) {
 }
 
 (async () => {
-  const browser = await chromium.launch({ headless: false, slowMo: 100 });
+  const erLinuxServer = process.platform === 'linux' && !process.env.DISPLAY;
+  const browser = await chromium.launch({ headless: erLinuxServer, slowMo: 100 });
   const context = await browser.newContext();
-  const page = await context.newPage();
+  const page    = await context.newPage();
 
   console.log('\nIndlaeser side: ' + URL_ARG);
   await page.goto(URL_ARG, { waitUntil: 'networkidle' });
+
+  // Accepter aldersbegrænsning hvis den vises (pornpics.com og lignende)
+  const ageSelectors = [
+    'button[class*="enter"]', 'button[class*="age"]', 'button[class*="adult"]',
+    'a[class*="enter"]', 'a[class*="age"]', '.age-gate button', '.age-verify button',
+    'button:has-text("Enter")', 'button:has-text("I am")', 'button:has-text("Yes")',
+    '#age-gate button', '.enter-button', '[data-age] button'
+  ];
+  for (const sel of ageSelectors) {
+    try {
+      const el = page.locator(sel).first();
+      if (await el.count() > 0) {
+        await el.click();
+        await page.waitForTimeout(1000);
+        console.log('  OK: Aldersbegrænsning accepteret');
+        break;
+      }
+    } catch(_) {}
+  }
 
   // Scroll ned for at loade lazy-load billeder
   console.log('  Scroller for at loade alle billeder...');
@@ -57,14 +79,12 @@ function sporg(sporgsmaal) {
   });
   await page.waitForTimeout(1500);
 
-  // Find kun billeder fra hoved-galleriet - spring relaterede sektioner over
+  // Find billeder - spring relaterede sektioner over
   const billeder = await page.evaluate(() => {
     const resultater = [];
     const billedExtensions = /\.(jpg|jpeg|png|webp|gif)(\?.*)?$/i;
-
-    // Klasser der indikerer relaterede/anbefalede sektioner
     const stopKlasser = ['related', 'recommend', 'similar', 'more-gall', 'suggestion', 'also-like', 'sponsor'];
-    const stopIds = ['main2', 'related', 'recommended', 'similar'];
+    const stopIds     = ['main2', 'related', 'recommended', 'similar'];
 
     function erIRelateret(el) {
       let node = el;
@@ -84,10 +104,8 @@ function sporg(sporgsmaal) {
       if (img.src.includes('logo') || img.src.includes('icon') || img.src.includes('banner') || img.src.includes('sprite')) return;
       if (erIRelateret(img)) return;
 
-      const link = img.closest('a');
-      const fullSrc = (link && link.href && billedExtensions.test(link.href))
-        ? link.href
-        : img.src;
+      const link    = img.closest('a');
+      const fullSrc = (link && link.href && billedExtensions.test(link.href)) ? link.href : img.src;
 
       resultater.push({
         fullSrc,
@@ -110,26 +128,11 @@ function sporg(sporgsmaal) {
 
   console.log('\nFandt ' + billeder.length + ' billeder:\n');
   billeder.forEach((b, i) => {
-    const dim = ' (' + b.width + 'x' + b.height + ')';
-    const alt = b.alt ? ' - "' + b.alt.substring(0, 35) + '"' : '';
-    const full = b.erFull ? ' [FULL SIZE tilgaengelig]' : '';
+    const dim  = ' (' + b.width + 'x' + b.height + ')';
+    const alt  = b.alt ? ' - "' + b.alt.substring(0, 35) + '"' : '';
+    const full = b.erFull ? ' [FULL SIZE]' : '';
     console.log((i + 1) + '. ' + b.thumbSrc.substring(0, 70) + dim + alt + full);
   });
-
-  const svar = await sporg('\nHvilket billede? (nummer eller "alle"): ');
-
-  let valgte = [];
-  if (svar.toLowerCase() === 'alle') {
-    valgte = billeder;
-  } else {
-    const nr = parseInt(svar);
-    if (isNaN(nr) || nr < 1 || nr > billeder.length) {
-      console.error('Ugyldigt nummer.');
-      await browser.close();
-      process.exit(1);
-    }
-    valgte = [billeder[nr - 1]];
-  }
 
   // Opret mappe
   const billedeMappe = join(process.cwd(), 'billeder', MAPPE);
@@ -137,60 +140,59 @@ function sporg(sporgsmaal) {
     mkdirSync(billedeMappe, { recursive: true });
   }
 
-  for (const b of valgte) {
-    console.log('\nHenter: ' + b.fullSrc.substring(0, 70) + '...');
+  console.log('\nHenter alle ' + billeder.length + ' billeder...\n');
+
+  for (const valgt of billeder) {
+    console.log('Henter: ' + valgt.fullSrc.substring(0, 70) + '...');
 
     try {
-      // Naviger direkte til billedet og gem via response
-      const imgPage = await context.newPage();
-      const response = await imgPage.goto(b.fullSrc, { waitUntil: 'load' });
+      const imgPage  = await context.newPage();
+      const response = await imgPage.goto(valgt.fullSrc, { waitUntil: 'load' });
 
-      if (response && response.ok()) {
-        const rawBuffer = await response.body();
+    if (response && response.ok()) {
+      const rawBuffer = await response.body();
 
-        // Crop 3% af bunden med sharp
-        const { default: sharp } = await import('sharp');
-        const metadata = await sharp(rawBuffer).metadata();
-        const cropPct = args.crop || 3;
-        const nyHojde = Math.round(metadata.height * (1 - cropPct / 100));
-        console.log('  Afskærer ' + cropPct + '% af bunden');
-        const buffer = await sharp(rawBuffer)
-          .extract({ left: 0, top: 0, width: metadata.width, height: nyHojde })
-          .jpeg({ quality: 92 })
-          .toBuffer();
+      // Crop bunden
+      const { default: sharp } = await import('sharp');
+      const metadata = await sharp(rawBuffer).metadata();
+      const nyHojde  = Math.round(metadata.height * (1 - CROP_PCT / 100));
+      console.log('  Afskærer ' + CROP_PCT + '% af bunden (' + metadata.height + ' → ' + nyHojde + 'px)');
 
-        // Tael eksisterende filer for at faa naeste nummer
-        const { readdirSync } = await import('fs');
-        const eksisterende = existsSync(billedeMappe) ? readdirSync(billedeMappe).filter(f => f.endsWith('.jpg')).length : 0;
-        const nr = String(eksisterende + 1).padStart(3, '0');
-        const seoNavn = MAPPE.toLowerCase()
-          .replace(/ae/g,'ae').replace(/oe/g,'oe').replace(/aa/g,'aa')
-          .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-        const filnavn = seoNavn + '-' + nr + '.jpg';
-        const filsti = join(billedeMappe, filnavn);
-        writeFileSync(filsti, buffer);
-        console.log('  OK: Gemt som billeder/' + MAPPE + '/' + filnavn);
-        console.log('  Storrelse: ' + Math.round(buffer.length / 1024) + ' KB (' + metadata.width + 'x' + nyHojde + ' px)');
-      } else {
-        console.log('  Advarsel: Kunne ikke hente billedet - prover screenshot...');
-        const { readdirSync: rds } = await import('fs');
-        const eks2 = existsSync(billedeMappe) ? rds(billedeMappe).filter(f => f.endsWith('.jpg') || f.endsWith('.png')).length : 0;
-        const nr2 = String(eks2 + 1).padStart(3, '0');
-        const seoNavn2 = MAPPE.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-        const filnavn = seoNavn2 + '-' + nr2 + '.png';
-        const filsti = join(billedeMappe, filnavn);
-        await imgPage.screenshot({ path: filsti });
-        console.log('  OK: Screenshot gemt som billeder/' + MAPPE + '/' + filnavn);
-      }
+      const buffer = await sharp(rawBuffer)
+        .extract({ left: 0, top: 0, width: metadata.width, height: nyHojde })
+        .jpeg({ quality: 92 })
+        .toBuffer();
+
+      // SEO-venligt filnavn med nummer
+      const eksisterende = readdirSync(billedeMappe).filter(f => f.endsWith('.jpg')).length;
+      const numStr  = String(eksisterende + 1).padStart(3, '0');
+      const seoNavn = MAPPE.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      const filnavn = seoNavn + '-' + numStr + '.jpg';
+      const filsti  = join(billedeMappe, filnavn);
+
+      writeFileSync(filsti, buffer);
+      console.log('  OK: Gemt som billeder/' + MAPPE + '/' + filnavn);
+      console.log('  Storrelse: ' + Math.round(buffer.length / 1024) + ' KB (' + metadata.width + 'x' + nyHojde + ' px)');
+    } else {
+      // Fallback: screenshot
+      const eksisterende = readdirSync(billedeMappe).filter(f => f.endsWith('.png') || f.endsWith('.jpg')).length;
+      const numStr  = String(eksisterende + 1).padStart(3, '0');
+      const seoNavn = MAPPE.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      const filnavn = seoNavn + '-' + numStr + '.png';
+      const filsti  = join(billedeMappe, filnavn);
+      await imgPage.screenshot({ path: filsti });
+      console.log('  OK: Screenshot gemt som billeder/' + MAPPE + '/' + filnavn);
+    }
 
       await imgPage.close();
-    } catch(e) {
+    } catch (e) {
       console.log('  Fejl ved hentning: ' + e.message);
     }
-  }
+  } // slut for loop
 
   await browser.close();
-  console.log('\nFaerdig! Billederne er klar i billeder/' + MAPPE + '/');
+  console.log('\nFaerdig! Billedet er klar i billeder/' + MAPPE + '/');
+
 })().catch(err => {
   console.error('\nFejl: ' + err.message);
   process.exit(1);
