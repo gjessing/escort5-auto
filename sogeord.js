@@ -14,6 +14,16 @@ const args = minimist(process.argv.slice(2));
 const ANTAL = args.antal || 10;
 const DAGE  = args.dage  || 90;
 const SITE  = process.env.SITE_URL || 'https://escort5.dk/';
+const LONGTAIL_MIN_ORD = args.minOrd || 3;
+const MIN_IMPRESSIONS = args.minVisninger || 10;
+
+function antalOrd(query) {
+  return String(query)
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .length;
+}
 
 async function hentSogeord() {
   console.log('\nHenter sogeord fra Google Search Console...');
@@ -59,35 +69,48 @@ async function hentSogeord() {
     return;
   }
 
-  // Filtrer og sorter - hoj visning, lav CTR = artikelmulighed
+  // Filtrer og sorter long tail-sogeord fra Search Console.
   const muligheder = rows
-    .filter(r => r.impressions >= 50 && r.ctr < 0.05 && r.position > 5)
-    .sort((a, b) => (b.impressions * (1 - b.ctr)) - (a.impressions * (1 - a.ctr)))
+    .map((r) => {
+      const query = r.keys?.[0] || '';
+      const ord = antalOrd(query);
+      const longtailScore = (r.impressions * (1 - r.ctr)) + (ord * 25) + (Math.max(r.position - 3, 0) * 10);
+      return { ...r, query, ord, longtailScore };
+    })
+    .filter((r) =>
+      r.query &&
+      r.ord >= LONGTAIL_MIN_ORD &&
+      r.impressions >= MIN_IMPRESSIONS &&
+      r.ctr < 0.1 &&
+      r.position > 3
+    )
+    .sort((a, b) => b.longtailScore - a.longtailScore)
     .slice(0, ANTAL);
 
   if (muligheder.length === 0) {
-    console.log('Ingen gode artikelmuligheder fundet med de nuvaerende filtre.');
-    console.log('Proev med: node sogeord.js --dage 180');
+    console.log('Ingen gode long tail muligheder fundet med de nuvaerende filtre.');
+    console.log('Proev med: node sogeord.js --dage 180 --minVisninger 5 --minOrd 2');
     return;
   }
 
-  console.log('TOP ARTIKELMULIGHEDER (hoj visning, lav CTR):');
-  console.log('='.repeat(60));
-  console.log('Nr  | Sogeord                          | Vis.  | CTR  | Pos.');
-  console.log('-'.repeat(60));
+  console.log(`TOP LONG TAIL SOGEORD (min. ${LONGTAIL_MIN_ORD} ord):`);
+  console.log('='.repeat(76));
+  console.log('Nr  | Sogeord                          | Ord | Vis.  | CTR  | Pos.');
+  console.log('-'.repeat(76));
 
   muligheder.forEach((r, i) => {
     const nr    = String(i + 1).padStart(2);
-    const query = r.keys[0].padEnd(32).substring(0, 32);
+    const query = r.query.padEnd(32).substring(0, 32);
+    const ord   = String(r.ord).padStart(3);
     const imp   = String(Math.round(r.impressions)).padStart(5);
     const ctr   = (r.ctr * 100).toFixed(1).padStart(4) + '%';
     const pos   = r.position.toFixed(1).padStart(5);
-    console.log(nr + '  | ' + query + ' | ' + imp + ' | ' + ctr + ' | ' + pos);
+    console.log(nr + '  | ' + query + ' | ' + ord + ' | ' + imp + ' | ' + ctr + ' | ' + pos);
   });
 
-  console.log('='.repeat(60));
+  console.log('='.repeat(76));
   console.log('\nBrug et sogeord direkte:');
-  console.log('node artikel.js --by "by" --emne "' + muligheder[0].keys[0] + '"');
+  console.log('node artikel.js --by "by" --emne "' + muligheder[0].query + '"');
   console.log('\nEller generer automatisk fra top sogeord:');
   console.log('node auto.js');
 }

@@ -78,7 +78,7 @@ bot.onText(/\/billede$/, (msg) => {
 bot.onText(/\/sogeord$/, (msg) => {
   const chatId = msg.chat.id;
   sessions[chatId] = { type: 'sogeord', step: 'mode' };
-  bot.sendMessage(chatId, `🔍 *Søgeord — vælg type:*\n\n1️⃣ Artikelmuligheder _(høj visning, lav CTR)_\n2️⃣ Lavt hængende frugter\n3️⃣ Brugerdefineret\n\n_Skriv 1, 2 eller 3_`,
+  bot.sendMessage(chatId, `🔍 *Søgeord — vælg type:*\n\n1️⃣ Artikelmuligheder _(høj visning, lav CTR)_\n2️⃣ Lavt hængende frugter\n3️⃣ Brugerdefineret\n4️⃣ Long tail søgeord\n\n_Skriv 1, 2, 3 eller 4_`,
     { parse_mode: 'Markdown' });
 });
 
@@ -213,8 +213,15 @@ bot.on('message', async (msg) => {
       } else if (tekst === '3') {
         session.step = 'antal';
         bot.sendMessage(chatId, `🔧 Hvor mange søgeord vil du se? _(Standard: 10)_`, { parse_mode: 'Markdown' });
+      } else if (tekst === '4') {
+        delete sessions[chatId];
+        bot.sendMessage(chatId, `⏳ Henter long tail søgeord...`);
+        exec(`cd ${ARBEJDSMAPPE} && node sogeord.js --antal 10 --dage 180 --minOrd 3 --minVisninger 5`, { timeout: 60000 }, (error, stdout) => {
+          if (error) bot.sendMessage(chatId, `❌ Fejl: ${error.message}`);
+          else bot.sendMessage(chatId, `🎯 *Long tail søgeord:*\n\`\`\`\n${stdout.slice(0, 3000)}\`\`\``, { parse_mode: 'Markdown' });
+        });
       } else {
-        bot.sendMessage(chatId, `Skriv venligst 1, 2 eller 3 😊`);
+        bot.sendMessage(chatId, `Skriv venligst 1, 2, 3 eller 4 😊`);
       }
 
     } else if (session.step === 'antal') {
