@@ -16,6 +16,38 @@ function shellEscape(value) {
   return String(value).replace(/"/g, '\\"');
 }
 
+function formatByNavn(value) {
+  return String(value)
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((ord) => ord.charAt(0).toUpperCase() + ord.slice(1))
+    .join(' ');
+}
+
+function findByIFraSogeord(query) {
+  const match = String(query)
+    .toLowerCase()
+    .match(/\b(?:i|på|ved|naer|nær)\s+([a-zæøå0-9-]+(?:\s+[a-zæøå0-9-]+){0,2})$/i);
+
+  return match ? formatByNavn(match[1]) : null;
+}
+
+function genererLongtailArtikel(chatId, by, emne) {
+  bot.sendMessage(chatId, `⏳ Genererer artikel om *${by}* med søgeordet *${emne}*...`, { parse_mode: 'Markdown' });
+  exec(
+    `cd ${ARBEJDSMAPPE} && node artikel.js --by "${shellEscape(by)}" --emne "${shellEscape(emne)}" --headless`,
+    { timeout: 180000 },
+    (error) => {
+      if (error) {
+        bot.sendMessage(chatId, `❌ Fejl: ${error.message}`);
+      } else {
+        bot.sendMessage(chatId, `✅ Artikel om *${by}* med søgeordet *${emne}* er publiceret på ${SITE_NAVN}!`, { parse_mode: 'Markdown' });
+      }
+    }
+  );
+}
+
 // ── /start ───────────────────────────────────────────────
 bot.onText(/\/start/, (msg) => {
   bot.sendMessage(msg.chat.id, `👋 Hej Søren! Jeg er din AI assistent til *${SITE_NAVN}*\n\nSkriv /help for at se hvad jeg kan!\n\n💬 Du kan også bare skrive til mig på dansk.`,
@@ -282,27 +314,24 @@ bot.on('message', async (msg) => {
         return;
       }
 
+      const byFraSogeord = findByIFraSogeord(valgtSogeord.query);
+
+      if (byFraSogeord) {
+        delete sessions[chatId];
+        bot.sendMessage(chatId, `📝 Du valgte *${valgtSogeord.query}*\n\nJeg bruger *${byFraSogeord}* som lokal fokus fra søgeordet.`, { parse_mode: 'Markdown' });
+        genererLongtailArtikel(chatId, byFraSogeord, valgtSogeord.query);
+        return;
+      }
+
       session.step = 'longtail_by';
       session.longtailValgt = valgtSogeord.query;
-      bot.sendMessage(chatId, `📝 Du valgte *${valgtSogeord.query}*\n\nHvilken by skal artiklen handle om?`, { parse_mode: 'Markdown' });
+      bot.sendMessage(chatId, `📝 Du valgte *${valgtSogeord.query}*\n\nSøgeordet har ikke en tydelig by i sig. Hvilken by skal artiklen handle om?`, { parse_mode: 'Markdown' });
 
     } else if (session.step === 'longtail_by') {
       const by = tekst.trim();
       const emne = session.longtailValgt;
       delete sessions[chatId];
-
-      bot.sendMessage(chatId, `⏳ Genererer artikel om *${by}* med søgeordet *${emne}*...`, { parse_mode: 'Markdown' });
-      exec(
-        `cd ${ARBEJDSMAPPE} && node artikel.js --by "${shellEscape(by)}" --emne "${shellEscape(emne)}" --headless`,
-        { timeout: 180000 },
-        (error) => {
-          if (error) {
-            bot.sendMessage(chatId, `❌ Fejl: ${error.message}`);
-          } else {
-            bot.sendMessage(chatId, `✅ Artikel om *${by}* med søgeordet *${emne}* er publiceret på ${SITE_NAVN}!`, { parse_mode: 'Markdown' });
-          }
-        }
-      );
+      genererLongtailArtikel(chatId, by, emne);
     }
     return;
   }

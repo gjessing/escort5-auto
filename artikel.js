@@ -262,10 +262,9 @@ async function postArtikel(artikel) {
 
   await page.screenshot({ path: 'screenshot.png' });
   console.log('\nScreenshot gemt: screenshot.png');
-  console.log('Browseren er aben - tjek felterne og tryk Gem.');
-  console.log('Lukker automatisk om 3 minutter.\n');
+  console.log('Lukker browseren automatisk om 5 sekunder.\n');
 
-  await page.waitForTimeout(180000);
+  await page.waitForTimeout(5000);
   await browser.close();
 }
 

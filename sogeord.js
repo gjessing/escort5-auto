@@ -18,6 +18,12 @@ const LONGTAIL_MIN_ORD = args.minOrd || 3;
 const MIN_IMPRESSIONS = args.minVisninger || 10;
 const JSON_OUTPUT = Boolean(args.json);
 
+function log(...messages) {
+  if (!JSON_OUTPUT) {
+    console.log(...messages);
+  }
+}
+
 function antalOrd(query) {
   return String(query)
     .trim()
@@ -27,9 +33,9 @@ function antalOrd(query) {
 }
 
 async function hentSogeord() {
-  console.log('\nHenter sogeord fra Google Search Console...');
-  console.log('Site: ' + SITE);
-  console.log('Periode: de seneste ' + DAGE + ' dage\n');
+  log('\nHenter sogeord fra Google Search Console...');
+  log('Site: ' + SITE);
+  log('Periode: de seneste ' + DAGE + ' dage\n');
 
   // Autentificer med service account
   const auth = new google.auth.GoogleAuth({
@@ -70,7 +76,7 @@ async function hentSogeord() {
       console.log(JSON.stringify({ success: true, muligheder: [] }, null, 2));
       return;
     }
-    console.log('Ingen data fundet. Tjek at service account har adgang til Search Console.');
+    log('Ingen data fundet. Tjek at service account har adgang til Search Console.');
     return;
   }
 
@@ -97,8 +103,8 @@ async function hentSogeord() {
       console.log(JSON.stringify({ success: true, muligheder: [] }, null, 2));
       return;
     }
-    console.log('Ingen gode long tail muligheder fundet med de nuvaerende filtre.');
-    console.log('Proev med: node sogeord.js --dage 180 --minVisninger 5 --minOrd 2');
+    log('Ingen gode long tail muligheder fundet med de nuvaerende filtre.');
+    log('Proev med: node sogeord.js --dage 180 --minVisninger 5 --minOrd 2');
     return;
   }
 
@@ -117,10 +123,10 @@ async function hentSogeord() {
     return;
   }
 
-  console.log(`TOP LONG TAIL SOGEORD (min. ${LONGTAIL_MIN_ORD} ord):`);
-  console.log('='.repeat(76));
-  console.log('Nr  | Sogeord                          | Ord | Vis.  | CTR  | Pos.');
-  console.log('-'.repeat(76));
+  log(`TOP LONG TAIL SOGEORD (min. ${LONGTAIL_MIN_ORD} ord):`);
+  log('='.repeat(76));
+  log('Nr  | Sogeord                          | Ord | Vis.  | CTR  | Pos.');
+  log('-'.repeat(76));
 
   muligheder.forEach((r, i) => {
     const nr    = String(i + 1).padStart(2);
@@ -129,14 +135,14 @@ async function hentSogeord() {
     const imp   = String(Math.round(r.impressions)).padStart(5);
     const ctr   = (r.ctr * 100).toFixed(1).padStart(4) + '%';
     const pos   = r.position.toFixed(1).padStart(5);
-    console.log(nr + '  | ' + query + ' | ' + ord + ' | ' + imp + ' | ' + ctr + ' | ' + pos);
+    log(nr + '  | ' + query + ' | ' + ord + ' | ' + imp + ' | ' + ctr + ' | ' + pos);
   });
 
-  console.log('='.repeat(76));
-  console.log('\nBrug et sogeord direkte:');
-  console.log('node artikel.js --by "by" --emne "' + muligheder[0].query + '"');
-  console.log('\nEller generer automatisk fra top sogeord:');
-  console.log('node auto.js');
+  log('='.repeat(76));
+  log('\nBrug et sogeord direkte:');
+  log('node artikel.js --by "by" --emne "' + muligheder[0].query + '"');
+  log('\nEller generer automatisk fra top sogeord:');
+  log('node auto.js');
 }
 
 hentSogeord().catch(err => {
