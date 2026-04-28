@@ -16,6 +16,7 @@ const DAGE  = args.dage  || 90;
 const SITE  = process.env.SITE_URL || 'https://escort5.dk/';
 const LONGTAIL_MIN_ORD = args.minOrd || 3;
 const MIN_IMPRESSIONS = args.minVisninger || 10;
+const JSON_OUTPUT = Boolean(args.json);
 
 function antalOrd(query) {
   return String(query)
@@ -65,6 +66,10 @@ async function hentSogeord() {
 
   const rows = res.data.rows || [];
   if (rows.length === 0) {
+    if (JSON_OUTPUT) {
+      console.log(JSON.stringify({ success: true, muligheder: [] }, null, 2));
+      return;
+    }
     console.log('Ingen data fundet. Tjek at service account har adgang til Search Console.');
     return;
   }
@@ -88,8 +93,27 @@ async function hentSogeord() {
     .slice(0, ANTAL);
 
   if (muligheder.length === 0) {
+    if (JSON_OUTPUT) {
+      console.log(JSON.stringify({ success: true, muligheder: [] }, null, 2));
+      return;
+    }
     console.log('Ingen gode long tail muligheder fundet med de nuvaerende filtre.');
     console.log('Proev med: node sogeord.js --dage 180 --minVisninger 5 --minOrd 2');
+    return;
+  }
+
+  if (JSON_OUTPUT) {
+    console.log(JSON.stringify({
+      success: true,
+      muligheder: muligheder.map((r, i) => ({
+        nr: i + 1,
+        query: r.query,
+        ord: r.ord,
+        impressions: Math.round(r.impressions),
+        ctr: Number((r.ctr * 100).toFixed(1)),
+        position: Number(r.position.toFixed(1))
+      }))
+    }, null, 2));
     return;
   }
 

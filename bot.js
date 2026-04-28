@@ -12,6 +12,10 @@ const SITE_NAVN = 'escort5.dk';
 // Sessions til dialog flows
 const sessions = {};
 
+function shellEscape(value) {
+  return String(value).replace(/"/g, '\\"');
+}
+
 // ── /start ───────────────────────────────────────────────
 bot.onText(/\/start/, (msg) => {
   bot.sendMessage(msg.chat.id, `👋 Hej Søren! Jeg er din AI assistent til *${SITE_NAVN}*\n\nSkriv /help for at se hvad jeg kan!\n\n💬 Du kan også bare skrive til mig på dansk.`,
@@ -214,11 +218,40 @@ bot.on('message', async (msg) => {
         session.step = 'antal';
         bot.sendMessage(chatId, `🔧 Hvor mange søgeord vil du se? _(Standard: 10)_`, { parse_mode: 'Markdown' });
       } else if (tekst === '4') {
-        delete sessions[chatId];
         bot.sendMessage(chatId, `⏳ Henter long tail søgeord...`);
-        exec(`cd ${ARBEJDSMAPPE} && node sogeord.js --antal 10 --dage 180 --minOrd 3 --minVisninger 5`, { timeout: 60000 }, (error, stdout) => {
-          if (error) bot.sendMessage(chatId, `❌ Fejl: ${error.message}`);
-          else bot.sendMessage(chatId, `🎯 *Long tail søgeord:*\n\`\`\`\n${stdout.slice(0, 3000)}\`\`\``, { parse_mode: 'Markdown' });
+        exec(`cd ${ARBEJDSMAPPE} && node sogeord.js --antal 10 --dage 180 --minOrd 3 --minVisninger 5 --json`, { timeout: 60000 }, (error, stdout) => {
+          if (error) {
+            delete sessions[chatId];
+            bot.sendMessage(chatId, `❌ Fejl: ${error.message}`);
+            return;
+          }
+
+          try {
+            const data = JSON.parse(stdout);
+            const muligheder = data.muligheder || [];
+
+            if (muligheder.length === 0) {
+              delete sessions[chatId];
+              bot.sendMessage(chatId, '❌ Ingen long tail søgeord fundet lige nu.');
+              return;
+            }
+
+            session.step = 'longtail_valg';
+            session.longtailMuligheder = muligheder;
+
+            const liste = muligheder
+              .map((m) => `${m.nr}. ${m.query} (${m.impressions} visninger, pos ${m.position})`)
+              .join('\n');
+
+            bot.sendMessage(
+              chatId,
+              `🎯 *Long tail søgeord:*\n\n${liste}\n\nSkriv nummeret på det søgeord du vil bruge til en artikel.`,
+              { parse_mode: 'Markdown' }
+            );
+          } catch (parseError) {
+            delete sessions[chatId];
+            bot.sendMessage(chatId, `❌ Kunne ikke læse resultatet fra sogeord.js: ${parseError.message}`);
+          }
         });
       } else {
         bot.sendMessage(chatId, `Skriv venligst 1, 2, 3 eller 4 😊`);
@@ -239,6 +272,37 @@ bot.on('message', async (msg) => {
         if (error) bot.sendMessage(chatId, `❌ Fejl: ${error.message}`);
         else bot.sendMessage(chatId, `🔍 *Søgeord:*\n\`\`\`\n${stdout.slice(0, 3000)}\`\`\``, { parse_mode: 'Markdown' });
       });
+    } else if (session.step === 'longtail_valg') {
+      const valg = parseInt(tekst, 10);
+      const muligheder = session.longtailMuligheder || [];
+      const valgtSogeord = muligheder.find((m) => m.nr === valg);
+
+      if (!valgtSogeord) {
+        bot.sendMessage(chatId, `Skriv et gyldigt nummer fra listen, fx 5.`);
+        return;
+      }
+
+      session.step = 'longtail_by';
+      session.longtailValgt = valgtSogeord.query;
+      bot.sendMessage(chatId, `📝 Du valgte *${valgtSogeord.query}*\n\nHvilken by skal artiklen handle om?`, { parse_mode: 'Markdown' });
+
+    } else if (session.step === 'longtail_by') {
+      const by = tekst.trim();
+      const emne = session.longtailValgt;
+      delete sessions[chatId];
+
+      bot.sendMessage(chatId, `⏳ Genererer artikel om *${by}* med søgeordet *${emne}*...`, { parse_mode: 'Markdown' });
+      exec(
+        `cd ${ARBEJDSMAPPE} && node artikel.js --by "${shellEscape(by)}" --emne "${shellEscape(emne)}" --headless`,
+        { timeout: 180000 },
+        (error) => {
+          if (error) {
+            bot.sendMessage(chatId, `❌ Fejl: ${error.message}`);
+          } else {
+            bot.sendMessage(chatId, `✅ Artikel om *${by}* med søgeordet *${emne}* er publiceret på ${SITE_NAVN}!`, { parse_mode: 'Markdown' });
+          }
+        }
+      );
     }
     return;
   }
