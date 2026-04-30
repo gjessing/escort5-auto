@@ -48,34 +48,77 @@ const KATEGORIER = {
   'blog':      '#ctl00_MainContent_RblTopicCategory_ctl03',
 };
 
+// Hjaelper: slugify et ord til URL (matcher escort5.dk's slug-konvention)
+function slugify(s) {
+  return (s || '').toString().toLowerCase()
+    .replace(/æ/g, 'ae').replace(/ø/g, 'oe').replace(/å/g, 'aa')
+    .replace(/ä/g, 'ae').replace(/ö/g, 'oe')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
 // Generer SEO-optimeret titel og betydning for ordbogs-indlaeg via Claude
-async function optimerOrdbog(titel, intro, body) {
+// ordbogsListe: array af { word, slug } - bruges til interne links (relaterede opslag)
+async function optimerOrdbog(titel, intro, body, ordbogsListe = []) {
   const erSvensk = (process.env.SITE_URL || '').includes('.se');
   const sprog = erSvensk ? 'svensk' : 'dansk';
+  const baseUrl = erSvensk ? 'https://escort.se' : 'https://escort5.dk';
+
+  // Filtrer og begraens listen af relaterede opslag (max 60 for prompt-stoerrelse)
+  const aktuelSlug = slugify(titel);
+  const kandidater = (ordbogsListe || [])
+    .filter(o => o && o.word && o.slug && o.slug !== aktuelSlug)
+    .slice(0, 60);
+
+  const linksListe = kandidater.length > 0
+    ? kandidater.map(o => `- "${o.word}" -> ${baseUrl}/ordbog/${o.slug}`).join('\n')
+    : '(ingen relaterede opslag tilgaengelige - undlad sektionen "Relaterede opslag")';
 
   const prompt = `Du er SEO-skribent og leksikograf for en ${sprog} escort/massage-ordbog.
-Optimer dette ordbogs-opslag.
+Optimer dette ordbogs-opslag efter moderne SEO best practices (2025): direkte svar (featured snippet), klar struktur, intern linking.
 
-NUVAERENDE TITEL/ORD: "${titel}"
+OPSLAGSORD: "${titel}"
 NUVAERENDE INTRO: "${(intro || '').substring(0, 300)}"
-NUVAERENDE BETYDNING/INDHOLD:
+NUVAERENDE INDHOLD:
 ${(body || 'Ingen tekst').substring(0, 2000)}
 
-Lav DISSE forbedringer:
-1. SEO-optimeret titel (50-65 tegn): bevar selve opslagsordet men udvid med beskrivende SEO-tekst.
-   Eksempler paa stil: "Eskorte — betydning, brug og guide" eller "Diskret — definition og forklaring"
-2. Ny betydning/broedtekst paa 150-300 ord, naturligt ${sprog}, med:
-   - Foerste afsnit (p tag): klar, praecis definition i 1-2 saetninger
-   - h2-overskrift "Betydning og brug" med p-tag uddybning af hvordan ordet bruges
-   - h2-overskrift "Synonymer og relaterede ord" med p-tag der lister 3-6 synonymer eller naert beslaegtede ord (komma-adskilt eller som kort tekst)
-3. Brug naturligt ${sprog} - ingen AI-klicheer, ingen "i denne artikel" eller lignende
-4. Indeholdende det primaere opslagsord flere gange naturligt for SEO
-5. Ingen markdown, kun rene HTML-tags (h2, p)
+TILGAENGELIGE ANDRE ORDBOGS-OPSLAG TIL INTERNE LINKS:
+${linksListe}
+
+GENERER FOELGENDE:
+
+1) TITEL (50-65 tegn) - spoergsmaal-format for featured snippets:
+   Format: "[opslagsordet] — [kort spoergsmaal eller beskrivelse]"
+   Eksempler:
+   - "69 stillingen — hvad er det?"
+   - "Diskret — hvad betyder det?"
+   - "GFE — hvad daekker det over?"
+
+2) BROEDTEKST som HTML (200-350 ord) i denne PRAECISE struktur:
+
+   <p>[Direkte svar paa 2-3 saetninger der svarer paa "hvad er ${titel}?". Skal vaere snippet-egnet og naevne opslagsordet i foerste saetning]</p>
+
+   <h2>Saadan bruges ${titel}</h2>
+   <p>[Praktisk forklaring af hvordan ordet/begrebet bruges - 2-4 saetninger]</p>
+
+   <h2>Variationer og relaterede begreber</h2>
+   <p>[3-5 variationer eller naert beslaegtede begreber - kort beskrevet i loebende prosa, ikke punktopstilling]</p>
+
+   <h2>Relaterede opslag</h2>
+   <p>${kandidater.length > 0 ? 'Vaelg 3-5 MEST relevante opslag fra listen ovenfor og lav HTML-links: <a href="' + baseUrl + '/ordbog/[slug]">[ord]</a>. Brug KUN ord fra listen, opfind ikke nye links. Skriv som loebende tekst, fx: "Se ogsaa ord1, ord2 og ord3."' : 'Spring denne sektion over - ingen relaterede opslag tilgaengelige.'}</p>
+
+REGLER:
+- Naturligt ${sprog}, ingen AI-klicheer, ingen "i denne artikel" eller "lad os se paa"
+- Ingen <h1> i body (titlen er allerede H1)
+- Ingen markdown - KUN rene HTML-tags (p, h2, a)
+- Naevn opslagsordet flere gange naturligt for SEO
+- Direkte svar i foerste p-tag SKAL begynde med eller tidligt naevne ${titel}
+${kandidater.length > 0 ? '- Interne links: brug PRAECIS det format ' + baseUrl + '/ordbog/[slug] som givet i listen. Opfind aldrig links.' : ''}
 
 Returner KUN et rent JSON-objekt uden markdown backticks:
 {
-  "nyTitel": "den nye SEO-optimerede titel",
-  "nyBody": "den nye betydning som HTML med h2 og p tags"
+  "nyTitel": "den nye titel i spoergsmaal-format",
+  "nyBody": "broedteksten som HTML med <p> direkte svar + 3 x <h2> sektioner med <p>"
 }`;
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -405,16 +448,28 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
 
       // Optimer via Claude — vaelg prompt baseret paa type
       const erOrdbog = TYPE.toLowerCase() === 'ordbog';
+
+      // For ordbog: byg liste af alle andre ordbogs-ord til interne links
+      let ordbogsListe = [];
+      if (erOrdbog) {
+        ordbogsListe = indlaeg
+          .map(it => ({ word: it.tekst, slug: slugify(it.tekst) }))
+          .filter(o => o.word && o.slug && o.slug !== slugify(item.tekst));
+        console.log('  Relaterede opslag tilgaengelige: ' + ordbogsListe.length);
+      }
+
       const optimeret = erOrdbog
-        ? await optimerOrdbog(nuvaerende.titel, nuvaerende.intro, nuvaerende.body)
+        ? await optimerOrdbog(nuvaerende.titel, nuvaerende.intro, nuvaerende.body, ordbogsListe)
         : await optimerIndlaeg(nuvaerende.titel, nuvaerende.intro, nuvaerende.body);
       console.log('  Ny titel:     ' + optimeret.nyTitel + ' (' + optimeret.nyTitel.length + ' tegn)');
       const h2antal = (optimeret.nyBody.match(/<h2/gi) || []).length;
       const h3antal = (optimeret.nyBody.match(/<h3/gi) || []).length;
       const ordAntal = (optimeret.nyBody.replace(/<[^>]+>/g, ' ').trim().split(/\s+/).filter(Boolean)).length;
-      console.log('  Ny tekst:     ' + optimeret.nyBody.length + ' tegn | ' + ordAntal + ' ord | h2: ' + h2antal + ' | h3: ' + h3antal);
+      const linkAntal = (optimeret.nyBody.match(/<a\s+[^>]*href=/gi) || []).length;
+      console.log('  Ny tekst:     ' + optimeret.nyBody.length + ' tegn | ' + ordAntal + ' ord | h2: ' + h2antal + ' | h3: ' + h3antal + (erOrdbog ? ' | interne links: ' + linkAntal : ''));
       if (h2antal === 0) console.log('  ADVARSEL: Ingen h2 tags i optimeret tekst!');
-      if (erOrdbog && (ordAntal < 100 || ordAntal > 400)) console.log('  ADVARSEL: Ordbogs-tekst udenfor maal-laengde 150-300 ord (' + ordAntal + ' ord)');
+      if (erOrdbog && (ordAntal < 150 || ordAntal > 400)) console.log('  ADVARSEL: Ordbogs-tekst udenfor maal-laengde 200-350 ord (' + ordAntal + ' ord)');
+      if (erOrdbog && ordbogsListe.length > 0 && linkAntal < 2) console.log('  ADVARSEL: Faa interne links (' + linkAntal + ') - forventede 3-5');
 
       // Opdater titel — ordbog bruger TbImageText (UI: "Titel"), artikel/blog bruger TbTitle
       const titelFeltId = erOrdbog
