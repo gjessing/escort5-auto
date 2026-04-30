@@ -12,7 +12,9 @@ import { assertRequiredEnv, parsePositiveInt } from './security.js';
 const args = minimist(process.argv.slice(2));
 const ANTAL   = parsePositiveInt(args.antal, 'antal', 1);
 const DAGE    = parsePositiveInt(args.dage, 'dage', 90);
-const HEADLESS = args.headless === true;
+// Auto-detekter Linux-server uden DISPLAY (ingen XServer) -> tving headless
+const erLinuxServer = process.platform === 'linux' && !process.env.DISPLAY;
+const HEADLESS = args.headless === true || erLinuxServer;
 const BLOG = args.blog === true;
 const SITE    = process.env.SITE_URL || 'https://escort5.dk/';
 

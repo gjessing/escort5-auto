@@ -15,7 +15,9 @@ const args = minimist(process.argv.slice(2));
 const TYPE     = args.type || 'artikel';
 const MAX      = parsePositiveInt(args.max, 'max', 999);
 const DRY      = args.dry  === true;
-const HEADLESS = args.headless === true; // Standard: vis browser (headless kun med --headless)
+// Auto-detekter Linux-server uden DISPLAY (ingen XServer) -> tving headless
+const erLinuxServer = process.platform === 'linux' && !process.env.DISPLAY;
+const HEADLESS = args.headless === true || erLinuxServer;
 const OPTIMERTEKST = args.optimertekst !== false; // standard: optimer tekst
 
 const { LOGIN_URL, ADMIN_URL, USERNAME, PASSWORD, ANTHROPIC_API_KEY } = process.env;
