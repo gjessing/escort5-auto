@@ -446,6 +446,35 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
       console.log('  Gammel titel: ' + nuvaerende.titel);
       console.log('  Broedtekst laest: ' + (nuvaerende.body ? nuvaerende.body.length + ' tegn' : 'TOM - ingen tekst fundet!'));
 
+      // Diagnostik: vis felt-attributter saa vi ved hvad vi har med at goere
+      const feltDiag = await page.evaluate(() => {
+        const ids = ['ctl00_MainContent_TbTitle', 'ctl00_MainContent_TbImageText', 'ctl00_MainContent_TbIntro', 'ctl00_MainContent_TbMetaDescription'];
+        return ids.map(id => {
+          const el = document.getElementById(id);
+          if (!el) return { id, exists: false };
+          return {
+            id,
+            exists: true,
+            tag: el.tagName,
+            value: (el.value || '').substring(0, 50),
+            maxLength: el.maxLength != null ? el.maxLength : -1,
+            readOnly: !!el.readOnly,
+            disabled: !!el.disabled,
+            type: el.type || ''
+          };
+        });
+      });
+      console.log('  Felt-status:');
+      feltDiag.forEach(d => {
+        if (!d.exists) { console.log('    ' + d.id + ': IKKE FUNDET'); return; }
+        const flags = [];
+        if (d.readOnly) flags.push('READONLY');
+        if (d.disabled) flags.push('DISABLED');
+        const flagsStr = flags.length ? ' [' + flags.join(',') + ']' : '';
+        const ml = d.maxLength > 0 ? d.maxLength : 'ubegraenset';
+        console.log('    ' + d.id + ': maxlength=' + ml + flagsStr + ' val="' + d.value + '"');
+      });
+
       // Optimer via Claude — vaelg prompt baseret paa type
       const erOrdbog = TYPE.toLowerCase() === 'ordbog';
 
@@ -593,6 +622,29 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
       try {
         await page.screenshot({ path: 'debug-' + TYPE + '-' + slugFil + '-efter.png', fullPage: true });
       } catch(_) {}
+
+      // Scan for ASP.NET valideringsfejl eller fejlmeddelelser paa siden
+      const fejlMeddelelser = await page.evaluate(() => {
+        const fejl = [];
+        // ASP.NET ValidationSummary
+        document.querySelectorAll('.validationSummary, [id*="ValidationSummary"], [id*="LblError"], .error-message, .alert-danger').forEach(el => {
+          const t = (el.textContent || '').trim();
+          if (t && t.length < 300) fejl.push(t);
+        });
+        // Synlig roed/orange tekst nær save-knap
+        document.querySelectorAll('span[style*="color"], div[style*="color"]').forEach(el => {
+          const s = (el.getAttribute('style') || '').toLowerCase();
+          if (s.includes('red') || s.includes('#f') || s.includes('orange')) {
+            const t = (el.textContent || '').trim();
+            if (t && t.length > 5 && t.length < 200) fejl.push(t);
+          }
+        });
+        return Array.from(new Set(fejl)).slice(0, 5);
+      });
+      if (fejlMeddelelser.length > 0) {
+        console.log('  Fejlmeddelelser paa siden efter save:');
+        fejlMeddelelser.forEach(f => console.log('    ! ' + f));
+      }
 
       // Verificer at saven virkede ved at laese titlen tilbage fra det felt vi opdaterede
       const titelEfter = await page.evaluate((id) => {
