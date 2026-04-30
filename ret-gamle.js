@@ -476,11 +476,16 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
         ? 'ctl00_MainContent_TbImageText'
         : 'ctl00_MainContent_TbTitle';
       const titelFelt = page.locator('#' + titelFeltId);
+      // Laes baseline FOER opdatering saa vi kan skelne ml. "save fejlede" og "form viser andet indlaeg"
+      const titelFoer = await page.evaluate((id) => {
+        const el = document.getElementById(id);
+        return el ? el.value : null;
+      }, titelFeltId);
       if (await titelFelt.count() > 0) {
         await titelFelt.click({ clickCount: 3 });
         await page.keyboard.press('Backspace');
         await titelFelt.fill(optimeret.nyTitel);
-        console.log('  OK: Titel skrevet til ' + (erOrdbog ? 'TbImageText (ordbog)' : 'TbTitle'));
+        console.log('  OK: Titel skrevet til ' + (erOrdbog ? 'TbImageText (ordbog)' : 'TbTitle') + ' (baseline: "' + (titelFoer || '').substring(0, 40) + '")');
       } else {
         console.log('  ADVARSEL: Titel-felt ikke fundet: ' + titelFeltId);
       }
@@ -503,8 +508,6 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
                     if (ta) ta.value = args.html;
                   }
                 } catch(_) {}
-                // Fortael editoren at indholdet er aendret
-                try { if (typeof e.control.fire === 'function') e.control.fire('Change'); } catch(_) {}
                 resultater.push('RadEditor.set_html OK');
               }
             });
@@ -598,22 +601,90 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
       }, titelFeltId);
 
       const urlEfter = page.url();
-      const titelMatcher = titelEfter && titelEfter.trim() === optimeret.nyTitel.trim();
+      const nyTitelTrim = optimeret.nyTitel.trim();
+      const titelEfterTrim = (titelEfter || '').trim();
+      const titelFoerTrim = (titelFoer || '').trim();
 
-      if (titelMatcher) {
-        console.log('  OK: Gemt! (titel verificeret paa form)');
-      } else if (titelEfter === null) {
+      let saveOK = false;
+      let saveStatus = '';
+
+      if (titelEfter === null) {
         // Form er forsvundet — sandsynligvis navigeret vaek = save lykkedes
-        console.log('  OK: Gemt! (navigeret vaek fra form: ' + urlEfter + ')');
+        saveOK = true;
+        saveStatus = 'navigeret vaek fra form: ' + urlEfter;
+      } else if (titelEfterTrim === nyTitelTrim) {
+        // Forventet match: vi gemte og formularen viser den nye titel
+        saveOK = true;
+        saveStatus = 'titel verificeret paa form';
+      } else if (titelEfterTrim === titelFoerTrim) {
+        // Form viser den GAMLE vaerdi: save persisterede IKKE
+        saveOK = false;
+        saveStatus = 'form viser ORIGINALE vaerdi - save fejlede';
       } else {
-        console.log('  ADVARSEL: Save lykkedes maaske IKKE!');
-        console.log('           Forventet titel: ' + optimeret.nyTitel.substring(0, 60));
-        console.log('           Faktisk titel:   ' + (titelEfter || '(tom)').substring(0, 60));
-        console.log('           URL foer:  ' + urlFoer);
-        console.log('           URL efter: ' + urlEfter);
+        // Form viser noget andet — sandsynligvis et andet indlaeg blev loadet efter save
+        // Re-verificer ved at navigere tilbage og finde indlaegget igen
+        console.log('  Re-verificerer ved at navigere tilbage til indlaegget...');
+        try {
+          await page.goto(ADMIN_URL, { waitUntil: 'networkidle' });
+          const kb2 = page.locator(katSelector);
+          if (await kb2.count() > 0) {
+            await kb2.click();
+            await page.waitForLoadState('networkidle').catch(() => {});
+            await page.waitForTimeout(800);
+          }
+          const renTekst2 = item.tekst.replace(/[.?!]/g, '').trim();
+          const fandt2 = await page.evaluate((soege) => {
+            const its = Array.from(document.querySelectorAll('li.rlbItem'));
+            for (let i = 0; i < its.length; i++) {
+              const summ = its[i].querySelector('.summery');
+              const slug = summ ? summ.textContent.trim() : '';
+              const ful = (its[i].textContent || '').replace(/\s+/g, ' ').trim();
+              let t = ful;
+              if (slug && ful.toLowerCase().endsWith(slug.toLowerCase())) {
+                t = ful.slice(0, ful.length - slug.length).trim();
+              }
+              const tl = t.toLowerCase(), sl = soege.toLowerCase();
+              if (tl.includes(sl) || sl.includes(tl.substring(0, Math.min(tl.length, 20)))) {
+                its[i].click();
+                return true;
+              }
+            }
+            return false;
+          }, renTekst2);
+
+          if (fandt2) {
+            try { await page.waitForSelector('#' + titelFeltId, { timeout: 6000 }); } catch(_) {}
+            await page.waitForTimeout(1200);
+            const titelGenLaest = await page.evaluate((id) => {
+              const el = document.getElementById(id);
+              return el ? el.value : null;
+            }, titelFeltId);
+            if (titelGenLaest && titelGenLaest.trim() === nyTitelTrim) {
+              saveOK = true;
+              saveStatus = 're-verificeret efter genaabning af indlaeg';
+            } else {
+              saveOK = false;
+              saveStatus = 're-verifikation fejlede - feltet indeholder: "' + (titelGenLaest || '').substring(0, 60) + '"';
+            }
+          } else {
+            saveOK = false;
+            saveStatus = 'kunne ikke finde indlaegget ved re-verifikation';
+          }
+        } catch(e) {
+          saveOK = false;
+          saveStatus = 're-verifikation fejlede med fejl: ' + e.message;
+        }
+      }
+
+      if (saveOK) {
+        console.log('  OK: Gemt! (' + saveStatus + ')');
+      } else {
+        console.log('  ADVARSEL: Save lykkedes IKKE - ' + saveStatus);
+        console.log('           Forventet titel: ' + nyTitelTrim.substring(0, 60));
+        console.log('           Form efter save: ' + (titelEfterTrim || '(tom)').substring(0, 60));
+        console.log('           Baseline (foer): ' + titelFoerTrim.substring(0, 60));
         console.log('           Tjek screenshots: debug-' + TYPE + '-' + slugFil + '-{foer,efter}.png');
         totalSprungetOver++;
-        // Skip log-skrivning saa vi proever igen naeste gang
         await page.waitForTimeout(1000);
         continue;
       }
@@ -622,7 +693,15 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
 
       // Gem i log-fil (kun hvis vi tror save lykkedes)
       const logEfter = await laesLogAsync();
-      logEfter.behandlet.push(TYPE + ':' + item.id);
+      const logKey = TYPE + ':' + item.id;
+      if (!logEfter.behandlet.includes(logKey)) logEfter.behandlet.push(logKey);
+      // Gem detaljer saa log-menu kan vise menneskeligt-laesbar info
+      if (!logEfter.detaljer) logEfter.detaljer = {};
+      logEfter.detaljer[logKey] = {
+        ord: item.tekst,
+        nyTitel: optimeret.nyTitel,
+        dato: new Date().toISOString()
+      };
       await gemLog(logEfter);
 
       await page.waitForTimeout(1500);
