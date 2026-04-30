@@ -187,6 +187,12 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
   const browser = await chromium.launch({ headless: HEADLESS, slowMo: 50 });
   const page = await browser.newPage();
 
+  // Auto-accepter alle dialog-popups (bekraeftelses-vinduer mv.)
+  page.on('dialog', async dialog => {
+    console.log('  Dialog vist: "' + dialog.message().substring(0, 80) + '" - accepterer');
+    try { await dialog.accept(); } catch(_) {}
+  });
+
   // Login
   console.log('Logger ind...');
   await page.goto(LOGIN_URL, { waitUntil: 'networkidle' });
@@ -410,12 +416,18 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
       if (h2antal === 0) console.log('  ADVARSEL: Ingen h2 tags i optimeret tekst!');
       if (erOrdbog && (ordAntal < 100 || ordAntal > 400)) console.log('  ADVARSEL: Ordbogs-tekst udenfor maal-laengde 150-300 ord (' + ordAntal + ' ord)');
 
-      // Opdater titel
-      const titelFelt = page.locator('#ctl00_MainContent_TbTitle');
+      // Opdater titel — ordbog bruger TbImageText (UI: "Titel"), artikel/blog bruger TbTitle
+      const titelFeltId = erOrdbog
+        ? 'ctl00_MainContent_TbImageText'
+        : 'ctl00_MainContent_TbTitle';
+      const titelFelt = page.locator('#' + titelFeltId);
       if (await titelFelt.count() > 0) {
         await titelFelt.click({ clickCount: 3 });
         await page.keyboard.press('Backspace');
         await titelFelt.fill(optimeret.nyTitel);
+        console.log('  OK: Titel skrevet til ' + (erOrdbog ? 'TbImageText (ordbog)' : 'TbTitle'));
+      } else {
+        console.log('  ADVARSEL: Titel-felt ikke fundet: ' + titelFeltId);
       }
 
       // Opdater brødtekst via Telerik editor
@@ -423,18 +435,27 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
         const bodyOpdateret = await page.evaluate(function(args) {
           var resultater = [];
 
-          // Metode 1: Telerik editor control API
+          // Metode 1: Telerik editor control API (autoritativ — Telerik laeser selv her ved submit)
           try {
             var editors = document.querySelectorAll('.RadEditor');
             editors.forEach(function(e) {
               if (e.control && typeof e.control.set_html === 'function') {
                 e.control.set_html(args.html);
+                // Tving editorens interne tilstand til at vaere "dirty" saa submit-handleren bruger nyt indhold
+                try {
+                  if (typeof e.control.get_textArea === 'function') {
+                    var ta = e.control.get_textArea();
+                    if (ta) ta.value = args.html;
+                  }
+                } catch(_) {}
+                // Fortael editoren at indholdet er aendret
+                try { if (typeof e.control.fire === 'function') e.control.fire('Change'); } catch(_) {}
                 resultater.push('RadEditor.set_html OK');
               }
             });
           } catch(e) { resultater.push('RadEditor fejl: ' + e.message); }
 
-          // Metode 2: Direkte iframe manipulation
+          // Metode 2: Direkte iframe manipulation (synlig i UI)
           try {
             var iframes = document.querySelectorAll('.reContentCell iframe, .RadEditor iframe');
             iframes.forEach(function(iframe) {
@@ -445,7 +466,7 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
             });
           } catch(e) { resultater.push('iframe fejl: ' + e.message); }
 
-          // Metode 3: Hidden textarea (backup)
+          // Metode 3: Hidden textarea (det der reelt postes til server)
           var el = document.getElementById(args.id);
           if (el) {
             el.value = args.html;
@@ -459,6 +480,19 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
 
         console.log('  OK: Brødtekst opdateret via: ' + bodyOpdateret);
         await page.waitForTimeout(500);
+
+        // Gentag: lige FØR save tvinger vi den skjulte textarea + iframe igen,
+        // i tilfaelde af at Telerik har overskrevet ved en mellemliggende handling
+        await page.evaluate(function(args) {
+          try {
+            var editors = document.querySelectorAll('.RadEditor');
+            editors.forEach(function(e) {
+              if (e.control && typeof e.control.set_html === 'function') e.control.set_html(args.html);
+            });
+          } catch(_) {}
+          var el = document.getElementById(args.id);
+          if (el) { el.value = args.html; el.dispatchEvent(new Event('change', { bubbles: true })); }
+        }, { id: 'ctl00_MainContent_EdtBodyContentHiddenTextarea', html: optimeret.nyBody });
       }
 
       // Opdater dato til dags dato
@@ -475,15 +509,63 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
         console.log('  OK: Dato opdateret: ' + dagsDato);
       }
 
+      // Sikker filnavn for screenshots
+      const skrm = (s) => (s || '').toLowerCase()
+        .replace(/æ/g, 'ae').replace(/ø/g, 'oe').replace(/å/g, 'aa')
+        .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').substring(0, 40) || 'item';
+      const slugFil = skrm(item.tekst);
+
+      // Screenshot FOER save - til debugging
+      try {
+        await page.screenshot({ path: 'debug-' + TYPE + '-' + slugFil + '-foer.png', fullPage: true });
+        console.log('  Screenshot foer save: debug-' + TYPE + '-' + slugFil + '-foer.png');
+      } catch(_) {}
+
       // Gem
+      const urlFoer = page.url();
       await Promise.all([
         page.waitForNavigation({ waitUntil: 'networkidle', timeout: 15000 }).catch(() => {}),
         page.click('#ctl00_MainContent_BtnSave'),
       ]);
-      console.log('  OK: Gemt!');
+      // Ekstra ventetid for AJAX-postback
+      await page.waitForTimeout(2500);
+      try { await page.waitForLoadState('networkidle', { timeout: 5000 }); } catch(_) {}
+
+      // Screenshot EFTER save
+      try {
+        await page.screenshot({ path: 'debug-' + TYPE + '-' + slugFil + '-efter.png', fullPage: true });
+      } catch(_) {}
+
+      // Verificer at saven virkede ved at laese titlen tilbage fra det felt vi opdaterede
+      const titelEfter = await page.evaluate((id) => {
+        const el = document.getElementById(id);
+        return el ? el.value : null;
+      }, titelFeltId);
+
+      const urlEfter = page.url();
+      const titelMatcher = titelEfter && titelEfter.trim() === optimeret.nyTitel.trim();
+
+      if (titelMatcher) {
+        console.log('  OK: Gemt! (titel verificeret paa form)');
+      } else if (titelEfter === null) {
+        // Form er forsvundet — sandsynligvis navigeret vaek = save lykkedes
+        console.log('  OK: Gemt! (navigeret vaek fra form: ' + urlEfter + ')');
+      } else {
+        console.log('  ADVARSEL: Save lykkedes maaske IKKE!');
+        console.log('           Forventet titel: ' + optimeret.nyTitel.substring(0, 60));
+        console.log('           Faktisk titel:   ' + (titelEfter || '(tom)').substring(0, 60));
+        console.log('           URL foer:  ' + urlFoer);
+        console.log('           URL efter: ' + urlEfter);
+        console.log('           Tjek screenshots: debug-' + TYPE + '-' + slugFil + '-{foer,efter}.png');
+        totalSprungetOver++;
+        // Skip log-skrivning saa vi proever igen naeste gang
+        await page.waitForTimeout(1000);
+        continue;
+      }
+
       totalOpdateret++;
 
-      // Gem i log-fil
+      // Gem i log-fil (kun hvis vi tror save lykkedes)
       const logEfter = await laesLogAsync();
       logEfter.behandlet.push(TYPE + ':' + item.id);
       await gemLog(logEfter);
