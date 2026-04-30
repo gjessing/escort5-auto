@@ -46,6 +46,71 @@ const KATEGORIER = {
   'blog':      '#ctl00_MainContent_RblTopicCategory_ctl03',
 };
 
+// Generer SEO-optimeret titel og betydning for ordbogs-indlaeg via Claude
+async function optimerOrdbog(titel, intro, body) {
+  const erSvensk = (process.env.SITE_URL || '').includes('.se');
+  const sprog = erSvensk ? 'svensk' : 'dansk';
+
+  const prompt = `Du er SEO-skribent og leksikograf for en ${sprog} escort/massage-ordbog.
+Optimer dette ordbogs-opslag.
+
+NUVAERENDE TITEL/ORD: "${titel}"
+NUVAERENDE INTRO: "${(intro || '').substring(0, 300)}"
+NUVAERENDE BETYDNING/INDHOLD:
+${(body || 'Ingen tekst').substring(0, 2000)}
+
+Lav DISSE forbedringer:
+1. SEO-optimeret titel (50-65 tegn): bevar selve opslagsordet men udvid med beskrivende SEO-tekst.
+   Eksempler paa stil: "Eskorte — betydning, brug og guide" eller "Diskret — definition og forklaring"
+2. Ny betydning/broedtekst paa 150-300 ord, naturligt ${sprog}, med:
+   - Foerste afsnit (p tag): klar, praecis definition i 1-2 saetninger
+   - h2-overskrift "Betydning og brug" med p-tag uddybning af hvordan ordet bruges
+   - h2-overskrift "Synonymer og relaterede ord" med p-tag der lister 3-6 synonymer eller naert beslaegtede ord (komma-adskilt eller som kort tekst)
+3. Brug naturligt ${sprog} - ingen AI-klicheer, ingen "i denne artikel" eller lignende
+4. Indeholdende det primaere opslagsord flere gange naturligt for SEO
+5. Ingen markdown, kun rene HTML-tags (h2, p)
+
+Returner KUN et rent JSON-objekt uden markdown backticks:
+{
+  "nyTitel": "den nye SEO-optimerede titel",
+  "nyBody": "den nye betydning som HTML med h2 og p tags"
+}`;
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1500,
+      messages: [{ role: 'user', content: prompt }],
+    }),
+  });
+
+  if (!res.ok) {
+    const errorBody = await res.text().catch(() => '');
+    throw new Error('Claude API HTTP fejl: ' + res.status + ' ' + res.statusText + (errorBody ? ' - ' + errorBody.slice(0, 200) : ''));
+  }
+  const data = await res.json();
+  if (data.error) throw new Error('Claude API fejl: ' + data.error.message);
+  if (!Array.isArray(data.content)) throw new Error('Claude API fejl: uventet svarformat');
+  const tekst = data.content.map(b => b.text || '').join('').trim();
+  const renTekst = tekst.replace(/```json|```/g, '').trim();
+  let parsed;
+  try {
+    parsed = JSON.parse(renTekst);
+  } catch {
+    throw new Error('Claude API fejl: ugyldigt JSON-svar');
+  }
+  if (typeof parsed.nyTitel !== 'string' || typeof parsed.nyBody !== 'string') {
+    throw new Error('Claude API fejl: manglende felter nyTitel/nyBody');
+  }
+  return parsed;
+}
+
 // Generer bedre H1 og optimeret brødtekst via Claude
 async function optimerIndlaeg(titel, intro, body) {
   const erSvensk = (process.env.SITE_URL || '').includes('.se');
@@ -330,13 +395,18 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
       console.log('  Gammel titel: ' + nuvaerende.titel);
       console.log('  Broedtekst laest: ' + (nuvaerende.body ? nuvaerende.body.length + ' tegn' : 'TOM - ingen tekst fundet!'));
 
-      // Optimer via Claude
-      const optimeret = await optimerIndlaeg(nuvaerende.titel, nuvaerende.intro, nuvaerende.body);
+      // Optimer via Claude — vaelg prompt baseret paa type
+      const erOrdbog = TYPE.toLowerCase() === 'ordbog';
+      const optimeret = erOrdbog
+        ? await optimerOrdbog(nuvaerende.titel, nuvaerende.intro, nuvaerende.body)
+        : await optimerIndlaeg(nuvaerende.titel, nuvaerende.intro, nuvaerende.body);
       console.log('  Ny titel:     ' + optimeret.nyTitel + ' (' + optimeret.nyTitel.length + ' tegn)');
       const h2antal = (optimeret.nyBody.match(/<h2/gi) || []).length;
       const h3antal = (optimeret.nyBody.match(/<h3/gi) || []).length;
-      console.log('  Ny tekst:     ' + optimeret.nyBody.length + ' tegn | h2: ' + h2antal + ' | h3: ' + h3antal);
+      const ordAntal = (optimeret.nyBody.replace(/<[^>]+>/g, ' ').trim().split(/\s+/).filter(Boolean)).length;
+      console.log('  Ny tekst:     ' + optimeret.nyBody.length + ' tegn | ' + ordAntal + ' ord | h2: ' + h2antal + ' | h3: ' + h3antal);
       if (h2antal === 0) console.log('  ADVARSEL: Ingen h2 tags i optimeret tekst!');
+      if (erOrdbog && (ordAntal < 100 || ordAntal > 400)) console.log('  ADVARSEL: Ordbogs-tekst udenfor maal-laengde 150-300 ord (' + ordAntal + ' ord)');
 
       // Opdater titel
       const titelFelt = page.locator('#ctl00_MainContent_TbTitle');
