@@ -2,26 +2,18 @@
 // Henter full-size billeder via Playwright - omgaar hotlink protection
 // Brug: node hent-billede.js --url "https://example.com" --mappe "escort"
 
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-process.emitWarning = (warning, ...args) => { if (String(warning).includes('NODE_TLS')) return; };
-
 import 'dotenv/config';
 import { chromium } from 'playwright';
 import { writeFileSync, mkdirSync, existsSync, readdirSync } from 'fs';
 import { join } from 'path';
 import minimist from 'minimist';
 import * as readline from 'readline';
+import { parsePercent, sanitizeLabel, validateHttpUrl } from './security.js';
 
 const args = minimist(process.argv.slice(2));
-const URL_ARG = args.url || args.u || null;
-const MAPPE   = args.mappe || args.m || 'generelle';
-const CROP_PCT = args.crop || 3;
-
-if (!URL_ARG) {
-  console.error('\nMangler URL!');
-  console.error('Brug: node hent-billede.js --url "https://example.com" --mappe "escort"\n');
-  process.exit(1);
-}
+const URL_ARG = validateHttpUrl(args.url || args.u || '', 'url');
+const MAPPE   = sanitizeLabel(args.mappe || args.m || 'generelle', 'mappe');
+const CROP_PCT = parsePercent(args.crop, 'crop', 3);
 
 function sporg(sporgsmaal) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });

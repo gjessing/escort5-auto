@@ -1,20 +1,22 @@
 // menu.js - Simpel menu til escort5-auto
 // Brug: node menu.js
 
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-process.emitWarning = (warning, ...args) => { if (String(warning).includes('NODE_TLS')) return; require('events').EventEmitter.prototype.emit.call(process, 'warning', warning, ...args); };
-import { execSync } from 'child_process';
 import * as readline from 'readline';
+import {
+  parsePercent,
+  parsePositiveInt,
+  runNodeScript,
+  sanitizeLabel,
+  validateHttpUrl
+} from './security.js';
 
 function sporg(sporgsmaal) {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   return new Promise(resolve => rl.question(sporgsmaal, ans => { rl.close(); resolve(ans.trim()); }));
 }
 
-function kor(kommando) {
-  try {
-    execSync(kommando, { stdio: 'inherit' });
-  } catch(e) {}
+function kor(script, args = []) {
+  runNodeScript(script, args);
 }
 
 async function main() {
@@ -40,73 +42,73 @@ async function main() {
   switch(valg) {
     case '1': {
       console.log('');
-      const antal = await sporg('Hvor mange artikler? (standard: 1): ') || '1';
-      const dage  = await sporg('Sogedata fra hvor mange dage? (standard: 90): ') || '90';
-      kor(`node auto.js --antal ${antal} --dage ${dage}`);
+      const antal = parsePositiveInt(await sporg('Hvor mange artikler? (standard: 1): '), 'antal', 1);
+      const dage  = parsePositiveInt(await sporg('Sogedata fra hvor mange dage? (standard: 90): '), 'dage', 90);
+      kor('auto.js', ['--antal', String(antal), '--dage', String(dage)]);
       break;
     }
 
     case '2': {
       console.log('');
-      const antal = await sporg('Hvor mange blogs? (standard: 1): ') || '1';
-      const dage  = await sporg('Sogedata fra hvor mange dage? (standard: 90): ') || '90';
-      kor(`node auto.js --antal ${antal} --dage ${dage} --blog`);
+      const antal = parsePositiveInt(await sporg('Hvor mange blogs? (standard: 1): '), 'antal', 1);
+      const dage  = parsePositiveInt(await sporg('Sogedata fra hvor mange dage? (standard: 90): '), 'dage', 90);
+      kor('auto.js', ['--antal', String(antal), '--dage', String(dage), '--blog']);
       break;
     }
 
     case '3': {
       console.log('');
-      const by   = await sporg('By (fx Kobenhavn, Aarhus): ');
-      const emne = await sporg('Emne (fx escort guide, massage): ');
-      if (!by || !emne) { console.log('By og emne er paakraevet.'); break; }
-      kor(`node artikel.js --by "${by}" --emne "${emne}"`);
+      const by   = sanitizeLabel(await sporg('By (fx Kobenhavn, Aarhus): '), 'By');
+      const emne = sanitizeLabel(await sporg('Emne (fx escort guide, massage): '), 'Emne');
+      kor('artikel.js', ['--by', by, '--emne', emne]);
       break;
     }
 
     case '4': {
       console.log('');
-      const by   = await sporg('By (fx Kobenhavn, Aarhus): ');
-      const emne = await sporg('Emne (fx escort guide, massage): ');
-      if (!by || !emne) { console.log('By og emne er paakraevet.'); break; }
-      kor(`node artikel.js --by "${by}" --emne "${emne}" --blog`);
+      const by   = sanitizeLabel(await sporg('By (fx Kobenhavn, Aarhus): '), 'By');
+      const emne = sanitizeLabel(await sporg('Emne (fx escort guide, massage): '), 'Emne');
+      kor('artikel.js', ['--by', by, '--emne', emne, '--blog']);
       break;
     }
 
     case '5': {
       console.log('');
-      const dage  = await sporg('Sogedata fra hvor mange dage? (standard: 90): ') || '90';
-      const antal = await sporg('Vis hvor mange sogeord? (standard: 10): ') || '10';
-      kor(`node sogeord.js --dage ${dage} --antal ${antal}`);
+      const dage  = parsePositiveInt(await sporg('Sogedata fra hvor mange dage? (standard: 90): '), 'dage', 90);
+      const antal = parsePositiveInt(await sporg('Vis hvor mange sogeord? (standard: 10): '), 'antal', 10);
+      kor('sogeord.js', ['--dage', String(dage), '--antal', String(antal)]);
       break;
     }
 
     case '6': {
       console.log('');
-      const url   = await sporg('URL til hjemmeside: ');
-      const mappe = await sporg('Gem i mappe (fx escort, massage, kobenhavn): ') || 'generelle';
-      const crop  = await sporg('Afskær % af bunden (standard: 3): ') || '3';
-      if (!url) { console.log('URL er paakraevet.'); break; }
-      kor(`node hent-billede.js --url "${url}" --mappe "${mappe}" --crop ${crop}`);
+      const url   = validateHttpUrl(await sporg('URL til hjemmeside: '), 'URL');
+      const mappe = sanitizeLabel(await sporg('Gem i mappe (fx escort, massage, kobenhavn): ') || 'generelle', 'Mappe');
+      const crop  = parsePercent(await sporg('Afskær % af bunden (standard: 3): '), 'crop', 3);
+      kor('hent-billede.js', ['--url', url, '--mappe', mappe, '--crop', String(crop)]);
       break;
     }
 
     case '7': {
-      kor('node manglende-byer.js');
+      kor('manglende-byer.js');
       break;
     }
 
     case '8': {
       console.log('');
-      const type = await sporg('Type (artikel/blog/ordbog/alle, standard: alle): ') || 'alle';
-      const max  = await sporg('Max antal at behandle (standard: alle): ') || '999';
+      const typeInput = (await sporg('Type (artikel/blog/ordbog/alle, standard: alle): ') || 'alle').toLowerCase();
+      const tilladteTyper = new Set(['artikel', 'blog', 'ordbog', 'alle']);
+      const type = tilladteTyper.has(typeInput) ? typeInput : 'alle';
+      const max = parsePositiveInt(await sporg('Max antal at behandle (standard: alle): '), 'max', 999);
       const dry  = await sporg('Dry-run - vis kun hvad der ville ske? (j/n): ') || 'n';
-      const dryFlag = dry.toLowerCase() === 'j' ? '--dry' : '';
-      kor(`node ret-gamle.js --type ${type} --max ${max} ${dryFlag}`);
+      const args = ['--type', type, '--max', String(max)];
+      if (dry.toLowerCase() === 'j') args.push('--dry');
+      kor('ret-gamle.js', args);
       break;
     }
 
     case '9': {
-      kor('node log-menu.js');
+      kor('log-menu.js');
       break;
     }
 

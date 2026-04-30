@@ -1,13 +1,11 @@
 // escort5-auto/artikel.js
 // Brug: node artikel.js --by "Kobenhavn" --emne "escort guide"
 
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-process.emitWarning = (warning, ...args) => { if (String(warning).includes('NODE_TLS')) return; require('events').EventEmitter.prototype.emit.call(process, 'warning', warning, ...args); };
-
 import 'dotenv/config';
 import { chromium } from 'playwright';
 import fetch from 'node-fetch';
 import minimist from 'minimist';
+import { assertRequiredEnv } from './security.js';
 
 const args = minimist(process.argv.slice(2));
 const BY      = args.by   || args.b || null;
@@ -61,6 +59,7 @@ async function hentBillede(by, emne) {
   return null;
 }
 const { LOGIN_URL, ADMIN_URL, USERNAME, PASSWORD, ANTHROPIC_API_KEY } = process.env;
+assertRequiredEnv(['LOGIN_URL', 'ADMIN_URL', 'USERNAME', 'PASSWORD', 'ANTHROPIC_API_KEY']);
 
 async function genererArtikel(by, emne, extra) {
   console.log('\nGenererer artikel om "' + emne + '" i ' + by + '...');
@@ -94,11 +93,27 @@ Returner KUN et rent JSON-objekt (ingen markdown, ingen backticks):
     }),
   });
 
+  if (!res.ok) {
+    const errorBody = await res.text().catch(() => '');
+    throw new Error('Claude API HTTP fejl: ' + res.status + ' ' + res.statusText + (errorBody ? ' - ' + errorBody.slice(0, 200) : ''));
+  }
   const data = await res.json();
   if (data.error) throw new Error('Claude API fejl: ' + data.error.message);
+  if (!Array.isArray(data.content)) throw new Error('Claude API fejl: uventet svarformat');
 
   const tekst = data.content.map(b => b.text || '').join('').trim();
-  const artikel = JSON.parse(tekst);
+  let artikel;
+  try {
+    artikel = JSON.parse(tekst);
+  } catch {
+    throw new Error('Claude API fejl: ugyldigt JSON-svar');
+  }
+  const requiredFields = ['imageText', 'title', 'intro', 'body', 'meta'];
+  for (const field of requiredFields) {
+    if (typeof artikel[field] !== 'string' || !artikel[field].trim()) {
+      throw new Error('Claude API fejl: manglende/ugyldigt felt "' + field + '"');
+    }
+  }
 
   if (artikel.intro.length > 256) {
     artikel.intro = artikel.intro.substring(0, 253) + '...';

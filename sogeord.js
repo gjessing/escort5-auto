@@ -3,19 +3,17 @@
 // Brug: node sogeord.js
 // Eller: node sogeord.js --antal 10 --dage 90
 
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-process.emitWarning = (warning, ...args) => { if (String(warning).includes('NODE_TLS')) return; require('events').EventEmitter.prototype.emit.call(process, 'warning', warning, ...args); };
-
 import 'dotenv/config';
 import { google } from 'googleapis';
 import minimist from 'minimist';
+import { parsePositiveInt } from './security.js';
 
 const args = minimist(process.argv.slice(2));
-const ANTAL = args.antal || 10;
-const DAGE  = args.dage  || 90;
+const ANTAL = parsePositiveInt(args.antal, 'antal', 10);
+const DAGE  = parsePositiveInt(args.dage, 'dage', 90);
 const SITE  = process.env.SITE_URL || 'https://escort5.dk/';
-const LONGTAIL_MIN_ORD = args.minOrd || 3;
-const MIN_IMPRESSIONS = args.minVisninger || 10;
+const LONGTAIL_MIN_ORD = parsePositiveInt(args.minOrd, 'minOrd', 3);
+const MIN_IMPRESSIONS = parsePositiveInt(args.minVisninger, 'minVisninger', 10);
 const JSON_OUTPUT = Boolean(args.json);
 
 function log(...messages) {
@@ -38,8 +36,10 @@ async function hentSogeord() {
   log('Periode: de seneste ' + DAGE + ' dage\n');
 
   // Autentificer med service account
+  const credentialsPath = process.env.GOOGLE_CREDENTIALS;
+  if (!credentialsPath) throw new Error('GOOGLE_CREDENTIALS mangler. Angiv sti til credentials-fil i .env');
   const auth = new google.auth.GoogleAuth({
-    keyFile: process.env.GOOGLE_CREDENTIALS || 'google-credentials.json',
+    keyFile: credentialsPath,
     scopes: ['https://www.googleapis.com/auth/webmasters.readonly'],
   });
 
@@ -148,7 +148,7 @@ async function hentSogeord() {
 hentSogeord().catch(err => {
   console.error('\nFejl: ' + err.message);
   if (err.message.includes('invalid_grant')) {
-    console.error('Tjek at google-credentials.json er korrekt og har adgang til Search Console');
+    console.error('Tjek at filen i GOOGLE_CREDENTIALS er korrekt og har adgang til Search Console');
   }
   process.exit(1);
 });

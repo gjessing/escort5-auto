@@ -2,29 +2,31 @@
 // Brug: node auto.js
 // Eller: node auto.js --antal 3 --dage 90
 
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-
 import 'dotenv/config';
 import { google } from 'googleapis';
 import { chromium } from 'playwright';
 import fetch from 'node-fetch';
 import minimist from 'minimist';
+import { assertRequiredEnv, parsePositiveInt } from './security.js';
 
 const args = minimist(process.argv.slice(2));
-const ANTAL   = args.antal || 1;
-const DAGE    = args.dage  || 90;
+const ANTAL   = parsePositiveInt(args.antal, 'antal', 1);
+const DAGE    = parsePositiveInt(args.dage, 'dage', 90);
 const HEADLESS = args.headless === true;
 const BLOG = args.blog === true;
 const SITE    = process.env.SITE_URL || 'https://escort5.dk/';
 
 const { LOGIN_URL, ADMIN_URL, USERNAME, PASSWORD, ANTHROPIC_API_KEY } = process.env;
+assertRequiredEnv(['LOGIN_URL', 'ADMIN_URL', 'USERNAME', 'PASSWORD', 'ANTHROPIC_API_KEY']);
 
 // ── Hent top sogeord fra Search Console ───────────────────────────────────────
 async function hentTopSogeord(antal, dage) {
   console.log('\nHenter sogeord fra Search Console...');
 
+  const credentialsPath = process.env.GOOGLE_CREDENTIALS;
+  if (!credentialsPath) throw new Error('GOOGLE_CREDENTIALS mangler. Angiv sti til credentials-fil i .env');
   const auth = new google.auth.GoogleAuth({
-    keyFile: process.env.GOOGLE_CREDENTIALS || 'google-credentials.json',
+    keyFile: credentialsPath,
     scopes: ['https://www.googleapis.com/auth/webmasters.readonly'],
   });
   const searchconsole = google.searchconsole({ version: 'v1', auth });
@@ -102,12 +104,28 @@ Returner KUN et rent JSON-objekt:
     }),
   });
 
+  if (!res.ok) {
+    const errorBody = await res.text().catch(() => '');
+    throw new Error('Claude API HTTP fejl: ' + res.status + ' ' + res.statusText + (errorBody ? ' - ' + errorBody.slice(0, 200) : ''));
+  }
   const data = await res.json();
   if (data.error) throw new Error('Claude API fejl: ' + data.error.message);
+  if (!Array.isArray(data.content)) throw new Error('Claude API fejl: uventet svarformat');
 
   const tekst = data.content.map(b => b.text || '').join('').trim();
   const renTekst = tekst.replace(/```json|```/g, '').trim();
-  const artikel = JSON.parse(renTekst);
+  let artikel;
+  try {
+    artikel = JSON.parse(renTekst);
+  } catch {
+    throw new Error('Claude API fejl: ugyldigt JSON-svar');
+  }
+  const requiredFields = ['emne', 'imageText', 'title', 'intro', 'body', 'meta'];
+  for (const field of requiredFields) {
+    if (typeof artikel[field] !== 'string' || !artikel[field].trim()) {
+      throw new Error('Claude API fejl: manglende/ugyldigt felt "' + field + '"');
+    }
+  }
 
   if (artikel.intro.length > 256) artikel.intro = artikel.intro.substring(0, 253) + '...';
 

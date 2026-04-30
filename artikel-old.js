@@ -1,9 +1,6 @@
 // escort5-auto/artikel.js
 // Brug: node artikel.js --by "Kobenhavn" --emne "escort guide"
 
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-process.emitWarning = (warning, ...args) => { if (String(warning).includes('NODE_TLS')) return; require('events').EventEmitter.prototype.emit.call(process, 'warning', warning, ...args); };
-
 import 'dotenv/config';
 import { chromium } from 'playwright';
 import fetch from 'node-fetch';

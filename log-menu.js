@@ -1,7 +1,6 @@
 // log-menu.js - Administrer ret-gamle-log.json
 // Brug: node log-menu.js
 
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import * as readline from 'readline';
 

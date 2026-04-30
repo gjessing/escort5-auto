@@ -5,22 +5,21 @@
 // 3. Opdaterer dato til dags dato
 // Brug: node ret-gamle.js --type artikel --max 5
 
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-process.emitWarning = (warning, ...args) => { if (String(warning).includes('NODE_TLS')) return; require('events').EventEmitter.prototype.emit.call(process, 'warning', warning, ...args); };
-
 import 'dotenv/config';
 import { chromium } from 'playwright';
 import fetch from 'node-fetch';
 import minimist from 'minimist';
+import { assertRequiredEnv, parsePositiveInt } from './security.js';
 
 const args = minimist(process.argv.slice(2));
 const TYPE     = args.type || 'artikel';
-const MAX      = args.max  || 999;
+const MAX      = parsePositiveInt(args.max, 'max', 999);
 const DRY      = args.dry  === true;
 const HEADLESS = args.headless === true; // Standard: vis browser (headless kun med --headless)
 const OPTIMERTEKST = args.optimertekst !== false; // standard: optimer tekst
 
 const { LOGIN_URL, ADMIN_URL, USERNAME, PASSWORD, ANTHROPIC_API_KEY } = process.env;
+assertRequiredEnv(['LOGIN_URL', 'ADMIN_URL', 'USERNAME', 'PASSWORD', 'ANTHROPIC_API_KEY']);
 
 // Log-fil til at huske hvilke artikler der er behandlet
 const LOG_FIL = 'ret-gamle-log.json';
@@ -90,11 +89,25 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
     }),
   });
 
+  if (!res.ok) {
+    const errorBody = await res.text().catch(() => '');
+    throw new Error('Claude API HTTP fejl: ' + res.status + ' ' + res.statusText + (errorBody ? ' - ' + errorBody.slice(0, 200) : ''));
+  }
   const data = await res.json();
   if (data.error) throw new Error('Claude API fejl: ' + data.error.message);
+  if (!Array.isArray(data.content)) throw new Error('Claude API fejl: uventet svarformat');
   const tekst = data.content.map(b => b.text || '').join('').trim();
   const renTekst = tekst.replace(/```json|```/g, '').trim();
-  return JSON.parse(renTekst);
+  let parsed;
+  try {
+    parsed = JSON.parse(renTekst);
+  } catch {
+    throw new Error('Claude API fejl: ugyldigt JSON-svar');
+  }
+  if (typeof parsed.nyTitel !== 'string' || typeof parsed.nyBody !== 'string') {
+    throw new Error('Claude API fejl: manglende felter nyTitel/nyBody');
+  }
+  return parsed;
 }
 
 (async () => {

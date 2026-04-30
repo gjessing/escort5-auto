@@ -1,7 +1,12 @@
 .env
+.env.*
+!.env.example
 node_modules/
-google-credentials-dk.json
+google-credentials*.json
 billeder/
 backlink-taeller.json
 *.log
 .DS_Store
+screenshot.png
+coverage/
+dist/

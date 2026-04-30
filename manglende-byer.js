@@ -2,13 +2,12 @@
 // Tjekker eksisterende blog indlaeg og finder manglende byer
 // Brug: node manglende-byer.js
 
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-process.emitWarning = (warning, ...args) => { if (String(warning).includes('NODE_TLS')) return; require('events').EventEmitter.prototype.emit.call(process, 'warning', warning, ...args); };
-
 import 'dotenv/config';
 import { chromium } from 'playwright';
+import { assertRequiredEnv } from './security.js';
 
 const { LOGIN_URL, ADMIN_URL, USERNAME, PASSWORD } = process.env;
+assertRequiredEnv(['LOGIN_URL', 'ADMIN_URL', 'USERNAME', 'PASSWORD']);
 
 // Danske byer der er relevante for escort
 const DANSKE_BYER = [
