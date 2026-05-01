@@ -520,20 +520,33 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
         const el = document.getElementById(id);
         return el ? el.value : null;
       }, titelFeltId);
-      if (await titelFelt.count() > 0) {
-        await titelFelt.click({ clickCount: 3 });
-        await page.keyboard.press('Backspace');
-        await titelFelt.fill(optimeret.nyTitel);
+      async function fillTitleField(id, value) {
+        const field = page.locator('#' + id);
+        if (await field.count() > 0) {
+          await field.click({ clickCount: 3 });
+          await page.keyboard.press('Backspace');
+          await field.fill(value);
+          await page.evaluate((fieldId) => {
+            const el = document.getElementById(fieldId);
+            if (el) {
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+          }, id);
+          return true;
+        }
+        return false;
+      }
+
+      const titelFeltSkrevet = await fillTitleField(titelFeltId, optimeret.nyTitel);
+      if (titelFeltSkrevet) {
         console.log('  OK: Titel skrevet til ' + (erOrdbog ? 'TbImageText (ordbog)' : 'TbTitle') + ' (baseline: "' + (titelFoer || '').substring(0, 40) + '")');
       } else {
         console.log('  ADVARSEL: Titel-felt ikke fundet: ' + titelFeltId);
       }
       if (erOrdbog && supplerendeTitelFeltId) {
-        const supplerendeTitelFelt = page.locator('#' + supplerendeTitelFeltId);
-        if (await supplerendeTitelFelt.count() > 0) {
-          await supplerendeTitelFelt.click({ clickCount: 3 });
-          await page.keyboard.press('Backspace');
-          await supplerendeTitelFelt.fill(optimeret.nyTitel);
+        const supplerendeTitelSkrevet = await fillTitleField(supplerendeTitelFeltId, optimeret.nyTitel);
+        if (supplerendeTitelSkrevet) {
           console.log('  OK: Titel skrevet til TbTitle (ordbog understøttende felt)');
         }
       }
@@ -673,19 +686,22 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
           res[id] = el ? el.value : null;
         });
         return res;
-      }, [titelFeltId].concat(supplerendeTitelFeltId ? [supplerendeTitelFeltId] : []));
-      const titelEfter = titelEfterFelter[titelFeltId] || Object.values(titelEfterFelter).find(v => v);
+      }, ['ctl00_MainContent_TbImageText', 'ctl00_MainContent_TbTitle']);
+      const titelEfterVærdier = Object.values(titelEfterFelter)
+        .map(v => (typeof v === 'string' ? v.trim() : ''))
+        .filter(Boolean);
+      const titelEfterTrim = titelEfterVærdier.find(v => v === optimeret.nyTitel.trim()) || titelEfterVærdier[0] || '';
+      const titelEfterErTom = titelEfterVærdier.length === 0;
 
       const urlEfter = page.url();
       const nyTitelTrim = optimeret.nyTitel.trim();
-      const titelEfterTrim = (titelEfter || '').trim();
       const titelFoerTrim = (titelFoer || '').trim();
 
       let saveOK = false;
       let saveStatus = ''; 
 
-      if (titelEfter === null) {
-        // Form er forsvundet — sandsynligvis navigeret vaek = save lykkedes
+      if (titelEfterErTom) {
+        // Ingen titelfelter fundet efter save — sandsynligvis navigeret vaek fra form
         saveOK = true;
         saveStatus = 'navigeret vaek fra form: ' + urlEfter;
       } else if (titelEfterTrim === nyTitelTrim) {
