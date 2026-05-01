@@ -63,6 +63,7 @@ async function optimerOrdbog(titel, intro, body, ordbogsListe = []) {
   const erSvensk = (process.env.SITE_URL || '').includes('.se');
   const sprog = erSvensk ? 'svensk' : 'dansk';
   const baseUrl = erSvensk ? 'https://escort.se' : 'https://escort5.dk';
+  const ordbogsPath = erSvensk ? '/Dictionary' : '/Dictionary'; // escort5.dk bruger /Dictionary
 
   // Filtrer og begraens listen af relaterede opslag (max 60 for prompt-stoerrelse)
   const aktuelSlug = slugify(titel);
@@ -71,7 +72,7 @@ async function optimerOrdbog(titel, intro, body, ordbogsListe = []) {
     .slice(0, 60);
 
   const linksListe = kandidater.length > 0
-    ? kandidater.map(o => `- "${o.word}" -> ${baseUrl}/ordbog/${o.slug}`).join('\n')
+    ? kandidater.map(o => `- "${o.word}" -> ${baseUrl}${ordbogsPath}/${o.slug}`).join('\n')
     : '(ingen relaterede opslag tilgaengelige - undlad sektionen "Relaterede opslag")';
 
   const prompt = `Du er SEO-skribent og leksikograf for en ${sprog} escort/massage-ordbog.
@@ -105,7 +106,7 @@ GENERER FOELGENDE:
    <p>[3-5 variationer eller naert beslaegtede begreber - kort beskrevet i loebende prosa, ikke punktopstilling]</p>
 
    <h2>Relaterede opslag</h2>
-   <p>${kandidater.length > 0 ? 'Vaelg 3-5 MEST relevante opslag fra listen ovenfor og lav HTML-links: <a href="' + baseUrl + '/ordbog/[slug]">[ord]</a>. Brug KUN ord fra listen, opfind ikke nye links. Skriv som loebende tekst, fx: "Se ogsaa ord1, ord2 og ord3."' : 'Spring denne sektion over - ingen relaterede opslag tilgaengelige.'}</p>
+   <p>${kandidater.length > 0 ? 'Vaelg 3-5 MEST relevante opslag fra listen ovenfor og lav HTML-links: <a href="' + baseUrl + ordbogsPath + '/[slug]">[ord]</a>. Brug KUN ord fra listen, opfind ikke nye links. Skriv som loebende tekst, fx: "Se ogsaa ord1, ord2 og ord3."' : 'Spring denne sektion over - ingen relaterede opslag tilgaengelige.'}</p>
 
 REGLER:
 - Naturligt ${sprog}, ingen AI-klicheer, ingen "i denne artikel" eller "lad os se paa"
@@ -113,7 +114,7 @@ REGLER:
 - Ingen markdown - KUN rene HTML-tags (p, h2, a)
 - Naevn opslagsordet flere gange naturligt for SEO
 - Direkte svar i foerste p-tag SKAL begynde med eller tidligt naevne ${titel}
-${kandidater.length > 0 ? '- Interne links: brug PRAECIS det format ' + baseUrl + '/ordbog/[slug] som givet i listen. Opfind aldrig links.' : ''}
+${kandidater.length > 0 ? '- Interne links: brug PRAECIS det format ' + baseUrl + ordbogsPath + '/[slug] som givet i listen. Opfind aldrig links.' : ''}
 
 Returner KUN et rent JSON-objekt uden markdown backticks:
 {
