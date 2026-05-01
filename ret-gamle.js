@@ -512,44 +512,31 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
       if (erOrdbog && ordbogsListe.length > 0 && linkAntal < 2) console.log('  ADVARSEL: Faa interne links (' + linkAntal + ') - forventede 3-5');
 
       // Opdater titel — ordbog bruger TbImageText (UI: "Titel"), artikel/blog bruger TbTitle
+      // For ordbog skrives KUN til TbImageText. TbTitle (opslagsord) bevares uaendret.
       const titelFeltId = erOrdbog
         ? 'ctl00_MainContent_TbImageText'
         : 'ctl00_MainContent_TbTitle';
       const titelFelt = page.locator('#' + titelFeltId);
-      const supplerendeTitelFeltId = erOrdbog ? 'ctl00_MainContent_TbTitle' : null;
+      // Laes baseline FOER opdatering saa vi kan skelne ml. "save fejlede" og "form viser andet indlaeg"
       const titelFoer = await page.evaluate((id) => {
         const el = document.getElementById(id);
         return el ? el.value : null;
       }, titelFeltId);
-      async function fillTitleField(id, value) {
-        const field = page.locator('#' + id);
-        if (await field.count() > 0) {
-          await field.click({ clickCount: 3 });
-          await page.keyboard.press('Backspace');
-          await field.fill(value);
-          await page.evaluate((fieldId) => {
-            const el = document.getElementById(fieldId);
-            if (el) {
-              el.dispatchEvent(new Event('input', { bubbles: true }));
-              el.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-          }, id);
-          return true;
-        }
-        return false;
-      }
-
-      const titelFeltSkrevet = await fillTitleField(titelFeltId, optimeret.nyTitel);
-      if (titelFeltSkrevet) {
+      if (await titelFelt.count() > 0) {
+        await titelFelt.click({ clickCount: 3 });
+        await page.keyboard.press('Backspace');
+        await titelFelt.fill(optimeret.nyTitel);
+        // Sikr at change-event fyrer saa ASP.NET ViewState opdateres
+        await page.evaluate((id) => {
+          const el = document.getElementById(id);
+          if (el) {
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        }, titelFeltId);
         console.log('  OK: Titel skrevet til ' + (erOrdbog ? 'TbImageText (ordbog)' : 'TbTitle') + ' (baseline: "' + (titelFoer || '').substring(0, 40) + '")');
       } else {
         console.log('  ADVARSEL: Titel-felt ikke fundet: ' + titelFeltId);
-      }
-      if (erOrdbog && supplerendeTitelFeltId) {
-        const supplerendeTitelSkrevet = await fillTitleField(supplerendeTitelFeltId, optimeret.nyTitel);
-        if (supplerendeTitelSkrevet) {
-          console.log('  OK: Titel skrevet til TbTitle (ordbog understøttende felt)');
-        }
       }
 
       // Opdater brødtekst via Telerik editor
@@ -680,29 +667,21 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
       }
 
       // Verificer at saven virkede ved at laese titlen tilbage fra det felt vi opdaterede
-      const titelEfterFelter = await page.evaluate((ids) => {
-        const res = {};
-        ids.forEach(id => {
-          const el = document.getElementById(id);
-          res[id] = el ? el.value : null;
-        });
-        return res;
-      }, ['ctl00_MainContent_TbImageText', 'ctl00_MainContent_TbTitle']);
-      const titelEfterVærdier = Object.values(titelEfterFelter)
-        .map(v => (typeof v === 'string' ? v.trim() : ''))
-        .filter(Boolean);
-      const titelEfterTrim = titelEfterVærdier.find(v => v === optimeret.nyTitel.trim()) || titelEfterVærdier[0] || '';
-      const titelEfterErTom = titelEfterVærdier.length === 0;
+      const titelEfter = await page.evaluate((id) => {
+        const el = document.getElementById(id);
+        return el ? el.value : null;
+      }, titelFeltId);
 
       const urlEfter = page.url();
       const nyTitelTrim = optimeret.nyTitel.trim();
+      const titelEfterTrim = (titelEfter || '').trim();
       const titelFoerTrim = (titelFoer || '').trim();
 
       let saveOK = false;
-      let saveStatus = ''; 
+      let saveStatus = '';
 
-      if (titelEfterErTom) {
-        // Ingen titelfelter fundet efter save — sandsynligvis navigeret vaek fra form
+      if (titelEfter === null) {
+        // Form er forsvundet — sandsynligvis navigeret vaek = save lykkedes
         saveOK = true;
         saveStatus = 'navigeret vaek fra form: ' + urlEfter;
       } else if (titelEfterTrim === nyTitelTrim) {
