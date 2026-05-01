@@ -437,7 +437,9 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
         };
       });
 
-      if (!nuvaerende.titel) {
+      const erOrdbog = TYPE.toLowerCase() === 'ordbog';
+      const nuvaerendeTitel = erOrdbog ? (nuvaerende.imageText || nuvaerende.titel) : nuvaerende.titel;
+      if (!nuvaerendeTitel) {
         console.log('  Advarsel: Ingen titel fundet - springer over');
         totalSprungetOver++;
         continue;
@@ -445,16 +447,16 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
 
       // Verificer at vi har den rigtige artikel - ikke en anden der tilfaeldigvis er oeverst
       const forventetTitel = item.tekst.toLowerCase().replace(/[.?!]/g, '').trim().substring(0, 15);
-      const faktiskTitel = nuvaerende.titel.toLowerCase().replace(/[.?!]/g, '').trim().substring(0, 15);
+      const faktiskTitel = nuvaerendeTitel.toLowerCase().replace(/[.?!]/g, '').trim().substring(0, 15);
       if (forventetTitel && faktiskTitel && !faktiskTitel.includes(forventetTitel) && !forventetTitel.includes(faktiskTitel)) {
         console.log('  Advarsel: Forkert artikel aabnet!');
         console.log('           Forventet: ' + item.tekst.substring(0, 40));
-        console.log('           Fik:       ' + nuvaerende.titel.substring(0, 40));
+        console.log('           Fik:       ' + nuvaerendeTitel.substring(0, 40));
         totalSprungetOver++;
         continue;
       }
 
-      console.log('  Gammel titel: ' + nuvaerende.titel);
+      console.log('  Gammel titel: ' + nuvaerendeTitel);
       console.log('  Broedtekst laest: ' + (nuvaerende.body ? nuvaerende.body.length + ' tegn' : 'TOM - ingen tekst fundet!'));
 
       // Diagnostik: vis felt-attributter saa vi ved hvad vi har med at goere
@@ -486,9 +488,6 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
         console.log('    ' + d.id + ': maxlength=' + ml + flagsStr + ' val="' + d.value + '"');
       });
 
-      // Optimer via Claude — vaelg prompt baseret paa type
-      const erOrdbog = TYPE.toLowerCase() === 'ordbog';
-
       // For ordbog: byg liste af alle andre ordbogs-ord til interne links
       let ordbogsListe = [];
       if (erOrdbog) {
@@ -499,8 +498,8 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
       }
 
       const optimeret = erOrdbog
-        ? await optimerOrdbog(nuvaerende.titel, nuvaerende.intro, nuvaerende.body, ordbogsListe)
-        : await optimerIndlaeg(nuvaerende.titel, nuvaerende.intro, nuvaerende.body);
+        ? await optimerOrdbog(nuvaerendeTitel, nuvaerende.intro, nuvaerende.body, ordbogsListe)
+        : await optimerIndlaeg(nuvaerendeTitel, nuvaerende.intro, nuvaerende.body);
       console.log('  Ny titel:     ' + optimeret.nyTitel + ' (' + optimeret.nyTitel.length + ' tegn)');
       const h2antal = (optimeret.nyBody.match(/<h2/gi) || []).length;
       const h3antal = (optimeret.nyBody.match(/<h3/gi) || []).length;
@@ -516,7 +515,7 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
         ? 'ctl00_MainContent_TbImageText'
         : 'ctl00_MainContent_TbTitle';
       const titelFelt = page.locator('#' + titelFeltId);
-      // Laes baseline FOER opdatering saa vi kan skelne ml. "save fejlede" og "form viser andet indlaeg"
+      const supplerendeTitelFeltId = erOrdbog ? 'ctl00_MainContent_TbTitle' : null;
       const titelFoer = await page.evaluate((id) => {
         const el = document.getElementById(id);
         return el ? el.value : null;
@@ -528,6 +527,15 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
         console.log('  OK: Titel skrevet til ' + (erOrdbog ? 'TbImageText (ordbog)' : 'TbTitle') + ' (baseline: "' + (titelFoer || '').substring(0, 40) + '")');
       } else {
         console.log('  ADVARSEL: Titel-felt ikke fundet: ' + titelFeltId);
+      }
+      if (erOrdbog && supplerendeTitelFeltId) {
+        const supplerendeTitelFelt = page.locator('#' + supplerendeTitelFeltId);
+        if (await supplerendeTitelFelt.count() > 0) {
+          await supplerendeTitelFelt.click({ clickCount: 3 });
+          await page.keyboard.press('Backspace');
+          await supplerendeTitelFelt.fill(optimeret.nyTitel);
+          console.log('  OK: Titel skrevet til TbTitle (ordbog understøttende felt)');
+        }
       }
 
       // Opdater brødtekst via Telerik editor
@@ -658,10 +666,15 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
       }
 
       // Verificer at saven virkede ved at laese titlen tilbage fra det felt vi opdaterede
-      const titelEfter = await page.evaluate((id) => {
-        const el = document.getElementById(id);
-        return el ? el.value : null;
-      }, titelFeltId);
+      const titelEfterFelter = await page.evaluate((ids) => {
+        const res = {};
+        ids.forEach(id => {
+          const el = document.getElementById(id);
+          res[id] = el ? el.value : null;
+        });
+        return res;
+      }, [titelFeltId].concat(supplerendeTitelFeltId ? [supplerendeTitelFeltId] : []));
+      const titelEfter = titelEfterFelter[titelFeltId] || Object.values(titelEfterFelter).find(v => v);
 
       const urlEfter = page.url();
       const nyTitelTrim = optimeret.nyTitel.trim();
@@ -669,7 +682,7 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
       const titelFoerTrim = (titelFoer || '').trim();
 
       let saveOK = false;
-      let saveStatus = '';
+      let saveStatus = ''; 
 
       if (titelEfter === null) {
         // Form er forsvundet — sandsynligvis navigeret vaek = save lykkedes
@@ -745,6 +758,7 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
         console.log('  ADVARSEL: Save lykkedes IKKE - ' + saveStatus);
         console.log('           Forventet titel: ' + nyTitelTrim.substring(0, 60));
         console.log('           Form efter save: ' + (titelEfterTrim || '(tom)').substring(0, 60));
+        console.log('           Felt-værdier efter save: ' + JSON.stringify(titelEfterFelter));
         console.log('           Baseline (foer): ' + titelFoerTrim.substring(0, 60));
         console.log('           Tjek screenshots: debug-' + TYPE + '-' + slugFil + '-{foer,efter}.png');
         totalSprungetOver++;
