@@ -227,13 +227,24 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
   console.log('Type: ' + TYPE + ' | Max: ' + MAX + (DRY ? ' | DRY-RUN' : '') + (OPTIMERTEKST ? ' | Med tekstoptimering' : ''));
   console.log('');
 
-  const browser = await chromium.launch({ headless: HEADLESS, slowMo: 50 });
-  const page = await browser.newPage();
+  const browser = await chromium.launch({
+    headless: HEADLESS,
+    slowMo: 50,
+    args: erLinuxServer ? ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'] : []
+  });
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 900 },
+  });
+  const page = await context.newPage();
 
   // Auto-accepter alle dialog-popups (bekraeftelses-vinduer mv.)
   page.on('dialog', async dialog => {
     console.log('  Dialog vist: "' + dialog.message().substring(0, 80) + '" - accepterer');
     try { await dialog.accept(); } catch(_) {}
+  });
+  page.on('popup', async popup => {
+    console.log('  ADVARSEL: Popup/tab blev aabnet med URL: ' + popup.url());
+    try { await popup.close(); } catch(_) {}
   });
 
   // Login
