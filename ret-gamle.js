@@ -446,21 +446,7 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
         continue;
       }
 
-      // Verificer at vi har den rigtige artikel - ikke en anden der tilfaeldigvis er oeverst
-      const forventetTitel = item.tekst.toLowerCase().replace(/[.?!]/g, '').trim().substring(0, 15);
-      const faktiskTitel = nuvaerendeTitel.toLowerCase().replace(/[.?!]/g, '').trim().substring(0, 15);
-      if (forventetTitel && faktiskTitel && !faktiskTitel.includes(forventetTitel) && !forventetTitel.includes(faktiskTitel)) {
-        console.log('  Advarsel: Forkert artikel aabnet!');
-        console.log('           Forventet: ' + item.tekst.substring(0, 40));
-        console.log('           Fik:       ' + nuvaerendeTitel.substring(0, 40));
-        totalSprungetOver++;
-        continue;
-      }
-
-      console.log('  Gammel titel: ' + nuvaerendeTitel);
-      console.log('  Broedtekst laest: ' + (nuvaerende.body ? nuvaerende.body.length + ' tegn' : 'TOM - ingen tekst fundet!'));
-
-      // Diagnostik: vis felt-attributter saa vi ved hvad vi har med at goere
+      // Diagnostik: vis felt-attributter FOER verifikation saa vi ser dem ogsaa hvis vi springer over
       const feltDiag = await page.evaluate(() => {
         const ids = ['ctl00_MainContent_TbTitle', 'ctl00_MainContent_TbImageText', 'ctl00_MainContent_TbIntro', 'ctl00_MainContent_TbMetaDescription'];
         return ids.map(id => {
@@ -488,6 +474,27 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
         const ml = d.maxLength > 0 ? d.maxLength : 'ubegraenset';
         console.log('    ' + d.id + ': maxlength=' + ml + flagsStr + ' val="' + d.value + '"');
       });
+
+      // Verificer at vi har den rigtige artikel - tjek BAADE TbTitle og TbImageText
+      // (listen kan vise et andet felt end vi forventer afhaengig af type)
+      const norm = s => (s || '').toLowerCase().replace(/[.?!]/g, '').trim();
+      const sogeText = norm(item.tekst).substring(0, 15);
+      const muligeTitler = [nuvaerende.titel, nuvaerende.imageText, nuvaerende.intro].filter(Boolean);
+      const matcherEt = muligeTitler.some(t => {
+        const tNorm = norm(t).substring(0, 30);
+        return sogeText && tNorm && (tNorm.includes(sogeText) || sogeText.includes(tNorm.substring(0, 15)));
+      });
+      if (!matcherEt) {
+        console.log('  Advarsel: Forkert artikel aabnet!');
+        console.log('           Forventet (fra listen): ' + item.tekst.substring(0, 40));
+        console.log('           TbTitle:                ' + (nuvaerende.titel || '(tom)').substring(0, 40));
+        console.log('           TbImageText:            ' + (nuvaerende.imageText || '(tom)').substring(0, 40));
+        totalSprungetOver++;
+        continue;
+      }
+
+      console.log('  Gammel titel: ' + nuvaerendeTitel);
+      console.log('  Broedtekst laest: ' + (nuvaerende.body ? nuvaerende.body.length + ' tegn' : 'TOM - ingen tekst fundet!'));
 
       // For ordbog: byg liste af alle andre ordbogs-ord til interne links
       let ordbogsListe = [];
