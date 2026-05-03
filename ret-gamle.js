@@ -364,10 +364,14 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
         }, { id: filterId, tekst: renTekst.trim() });
         await page.waitForTimeout(1500);
 
-        // Hjaelpefunktion: find det rigtige element i listen
-        // Find artikel direkte i DOM uden filter
-        const fandtItem = await page.evaluate((soege) => {
+        // Hjaelpefunktion: find det rigtige element i listen med prioriteret matching
+        // Prioritet: 4=eksakt, 3=starter-med, 2=indeholder. INGEN "soegeord-indeholder-item" (giver false positives)
+        const matchResultat = await page.evaluate((soege) => {
           const items = Array.from(document.querySelectorAll('li.rlbItem'));
+          let bedstePrioritet = 0;
+          let bedsteEl = null;
+          let bedsteTekst = '';
+          const sl = soege.toLowerCase().trim();
           for (let i = 0; i < items.length; i++) {
             const el = items[i];
             const summery = el.querySelector('.summery');
@@ -378,16 +382,32 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
               tekst = fulTekst.slice(0, fulTekst.length - slugTekst.length).trim();
             }
             const tl = tekst.toLowerCase();
-            const sl = soege.toLowerCase();
-            if (tl.includes(sl) || sl.includes(tl.substring(0, Math.min(tl.length, 20)))) {
-              el.click();
-              return true;
+
+            let prioritet = 0;
+            if (tl === sl) prioritet = 4;                    // Eksakt match
+            else if (tl.startsWith(sl + ' ')) prioritet = 3; // Item starter med soegeord (efterfulgt af mellemrum)
+            else if (tl.startsWith(sl)) prioritet = 3;       // Item starter med soegeord
+            else if (tl.includes(' ' + sl + ' ') || tl.includes(' ' + sl) || tl.includes(sl + ' ')) prioritet = 2; // Soegeord findes som helt ord
+            else if (tl.includes(sl)) prioritet = 1;         // Soegeord findes som substring (svageste match)
+
+            if (prioritet > bedstePrioritet) {
+              bedstePrioritet = prioritet;
+              bedsteEl = el;
+              bedsteTekst = tekst;
             }
           }
-          return false;
+          if (bedsteEl) {
+            bedsteEl.click();
+            return { fundet: true, prioritet: bedstePrioritet, tekst: bedsteTekst };
+          }
+          return { fundet: false, prioritet: 0, tekst: '' };
         }, renTekst);
 
-        if (fandtItem) fundet = true;
+        if (matchResultat.fundet) {
+          fundet = true;
+          const prioNavn = ['intet', 'substring', 'helt-ord', 'starter-med', 'eksakt'][matchResultat.prioritet] || '?';
+          console.log('  Match: "' + matchResultat.tekst.substring(0, 40) + '" (prioritet: ' + prioNavn + ')');
+        }
 
         // Filter ryddes automatisk ved navigation til admin
       }
