@@ -88,12 +88,13 @@ ${linksListe}
 
 GENERER FOELGENDE:
 
-1) TITEL (50-65 tegn) - spoergsmaal-format for featured snippets:
+1) TITEL (45-60 tegn — VIGTIGT: ALDRIG over 60 tegn) - spoergsmaal-format for featured snippets:
    Format: "[opslagsordet] — [kort spoergsmaal eller beskrivelse]"
-   Eksempler:
-   - "69 stillingen — hvad er det?"
-   - "Diskret — hvad betyder det?"
-   - "GFE — hvad daekker det over?"
+   Hold dig kort! Eksempler:
+   - "69 stillingen — hvad er det?"        (28 tegn)
+   - "Diskret — hvad betyder det?"          (27 tegn)
+   - "GFE — hvad daekker det over?"         (29 tegn)
+   - "Prostata massage — hvad er det?"      (32 tegn)
 
 2) BROEDTEKST som HTML (200-350 ord) i denne PRAECISE struktur:
 
@@ -543,6 +544,18 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
       const titelFeltId = erOrdbog
         ? 'ctl00_MainContent_TbImageText'
         : 'ctl00_MainContent_TbTitle';
+
+      // Trunker nyTitel hvis den overskrider feltets maxlength (saa systemet ikke selv afkorter)
+      const titelFeltMaxlength = (feltDiag.find(d => d.id === titelFeltId) || {}).maxLength || 0;
+      if (titelFeltMaxlength > 0 && optimeret.nyTitel.length > titelFeltMaxlength) {
+        const orig = optimeret.nyTitel;
+        // Forsoeg at trunkere ved sidste mellemrum FOER maxlength for at undgaa skaarne ord
+        let truncated = orig.substring(0, titelFeltMaxlength);
+        const lastSpace = truncated.lastIndexOf(' ');
+        if (lastSpace > titelFeltMaxlength * 0.7) truncated = truncated.substring(0, lastSpace);
+        optimeret.nyTitel = truncated;
+        console.log('  Titel trunkeret: ' + orig.length + ' -> ' + optimeret.nyTitel.length + ' tegn (felt maxlength=' + titelFeltMaxlength + ')');
+      }
       const titelFelt = page.locator('#' + titelFeltId);
       // Laes baseline FOER opdatering saa vi kan skelne ml. "save fejlede" og "form viser andet indlaeg"
       const titelFoer = await page.evaluate((id) => {
@@ -781,7 +794,6 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
         console.log('  ADVARSEL: Save lykkedes IKKE - ' + saveStatus);
         console.log('           Forventet titel: ' + nyTitelTrim.substring(0, 60));
         console.log('           Form efter save: ' + (titelEfterTrim || '(tom)').substring(0, 60));
-        console.log('           Felt-værdier efter save: ' + JSON.stringify(titelEfterFelter));
         console.log('           Baseline (foer): ' + titelFoerTrim.substring(0, 60));
         console.log('           Tjek screenshots: debug-' + TYPE + '-' + slugFil + '-{foer,efter}.png');
         totalSprungetOver++;
