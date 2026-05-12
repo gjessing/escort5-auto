@@ -405,25 +405,94 @@ async function vaelgSprog(page, sprogTekst) {
         page.waitForNavigation({ waitUntil: 'networkidle', timeout: 15000 }).catch(() => {}),
         page.click('#ctl00_MainContent_BtnSave'),
       ]);
-      await page.waitForTimeout(2500);
-      try { await page.waitForLoadState('networkidle', { timeout: 5000 }); } catch(_) {}
+      await page.waitForTimeout(4000); // Laengere vent paa AJAX postback ved sprog-skift
+      try { await page.waitForLoadState('networkidle', { timeout: 8000 }); } catch(_) {}
 
-      // ── Verificer save ──
-      const titelEfter = await page.evaluate(() => {
-        const el = document.getElementById('ctl00_MainContent_TbImageText');
-        return el ? el.value : null;
+      // ── Screenshot EFTER save ──
+      try { await page.screenshot({ path: 'oversaet-' + SPROG_KODE + '-' + slugFil + '-efter.png', fullPage: true }); } catch(_) {}
+
+      // ── Diagnostik: aktuelt sprog + felt-vaerdi ──
+      const status1 = await page.evaluate(() => {
+        const langEl = document.getElementById('ctl00_MainContent_CbLanguage_Input');
+        const titEl = document.getElementById('ctl00_MainContent_TbImageText');
+        return {
+          aktuelSprog: langEl ? langEl.value : null,
+          tbImageText: titEl ? titEl.value : null,
+        };
       });
-      const matcher = titelEfter && titelEfter.trim() === oversat.nyTitel.trim();
+      console.log('  Efter save: sprog="' + status1.aktuelSprog + '" titel="' + (status1.tbImageText || '(tom)').substring(0, 50) + '"');
+
+      let matcher = status1.tbImageText && status1.tbImageText.trim() === oversat.nyTitel.trim();
+
+      // Hvis sproget skiftede tilbage automatisk, skift til target og tjek igen
+      if (!matcher && status1.aktuelSprog && status1.aktuelSprog !== sprogInfo.tekst) {
+        console.log('  Sprog skiftede til ' + status1.aktuelSprog + ' efter save. Skifter tilbage til ' + sprogInfo.tekst + '...');
+        try { await vaelgSprog(page, sprogInfo.tekst); } catch(_) {}
+        const status2 = await page.evaluate(() => {
+          const titEl = document.getElementById('ctl00_MainContent_TbImageText');
+          return titEl ? titEl.value : null;
+        });
+        console.log('  Efter sprog-tilbageskift: titel="' + (status2 || '(tom)').substring(0, 50) + '"');
+        if (status2 && status2.trim() === oversat.nyTitel.trim()) matcher = true;
+      }
+
+      // Sidste forsoeg: naviger helt tilbage til indlaegget og tjek fra frisk page-load
+      if (!matcher) {
+        console.log('  Re-verificerer ved at genaabne indlaegget fra admin...');
+        try {
+          await page.goto(ADMIN_URL, { waitUntil: 'networkidle' });
+          const kb3 = page.locator(KATEGORI_ORDBOG);
+          if (await kb3.count() > 0) { await kb3.click(); await page.waitForLoadState('networkidle').catch(() => {}); await page.waitForTimeout(1000); }
+          const renTekst3 = item.tekst.replace(/[.?!]/g, '').trim();
+          const fundIgen = await page.evaluate((soege) => {
+            const its = Array.from(document.querySelectorAll('li.rlbItem'));
+            let p = 0, el = null;
+            const sl = soege.toLowerCase().trim();
+            for (const e of its) {
+              const summ = e.querySelector('.summery');
+              const sT = summ ? summ.textContent.trim() : '';
+              const fT = (e.textContent || '').replace(/\s+/g, ' ').trim();
+              let t = fT;
+              if (sT && fT.toLowerCase().endsWith(sT.toLowerCase())) t = fT.slice(0, fT.length - sT.length).trim();
+              const tl = t.toLowerCase();
+              let pp = 0;
+              if (tl === sl) pp = 4;
+              else if (tl.startsWith(sl)) pp = 3;
+              else if (tl.includes(sl)) pp = 2;
+              if (pp > p) { p = pp; el = e; }
+            }
+            if (el) { el.click(); return true; }
+            return false;
+          }, renTekst3);
+
+          if (fundIgen) {
+            try { await page.waitForLoadState('networkidle', { timeout: 8000 }); } catch(_) {}
+            try { await page.waitForSelector('#ctl00_MainContent_TbTitle', { timeout: 6000 }); } catch(_) {}
+            await page.waitForTimeout(1500);
+            // Skift til target sprog og tjek
+            await vaelgSprog(page, sprogInfo.tekst);
+            const status3 = await page.evaluate(() => {
+              const titEl = document.getElementById('ctl00_MainContent_TbImageText');
+              return titEl ? titEl.value : null;
+            });
+            console.log('  Re-verifikation: titel="' + (status3 || '(tom)').substring(0, 50) + '"');
+            if (status3 && status3.trim() === oversat.nyTitel.trim()) {
+              matcher = true;
+              console.log('  OK: Save er persisteret (verificeret efter genaabning)');
+            }
+          }
+        } catch(e) {
+          console.log('  Re-verifikation fejlede: ' + e.message);
+        }
+      }
+
       if (matcher) {
         console.log('  OK: Gemt og verificeret');
-      } else if (titelEfter === null) {
-        console.log('  OK: Gemt (form navigeret vaek)');
       } else {
-        console.log('  Advarsel: Verifikation fejlede');
+        console.log('  ADVARSEL: Verifikation fejlede - oversaettelsen blev sandsynligvis IKKE gemt');
         console.log('           Forventet: ' + oversat.nyTitel.substring(0, 60));
-        console.log('           Faktisk:   ' + (titelEfter || '(tom)').substring(0, 60));
+        console.log('           Tjek screenshots: oversaet-' + SPROG_KODE + '-' + slugFil + '-{foer,efter}.png');
         antalSpring++;
-        // Skift tilbage til DA inden vi fortsaetter
         try { await vaelgSprog(page, 'Dansk'); } catch(_) {}
         continue;
       }
