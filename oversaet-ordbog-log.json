@@ -1,7 +1,8 @@
 {
   "behandlet": [
     "ordbog:ctl00_MainContent_LbTopics_i0:en",
-    "ordbog:ctl00_MainContent_LbTopics_i1:en"
+    "ordbog:ctl00_MainContent_LbTopics_i1:en",
+    "ordbog:ctl00_MainContent_LbTopics_i2:en"
   ],
   "detaljer": {
     "ordbog:ctl00_MainContent_LbTopics_i0:en": {
@@ -15,6 +16,12 @@
       "sprog": "Engelsk",
       "nyTitel": "Real kiss — what does it mean and how is it used?",
       "dato": "2026-05-14T04:18:09.783Z"
+    },
+    "ordbog:ctl00_MainContent_LbTopics_i2:en": {
+      "ord": "Amerikansk",
+      "sprog": "Engelsk",
+      "nyTitel": "American — meaning in escort and massage services",
+      "dato": "2026-05-14T04:19:13.360Z"
     }
   }
 }
