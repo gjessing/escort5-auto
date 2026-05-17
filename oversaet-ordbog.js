@@ -16,7 +16,7 @@ const args = minimist(process.argv.slice(2));
 const SPROG_KODE = (args.sprog || args.s || '').toLowerCase();
 const MAX = parsePositiveInt(args.max, 'max', 999);
 const DRY = args.dry === true;
-const LOOKUP = (args.ord || args.soeg || args.soege || args.word || args.term || '').toString().trim();
+const LOOKUP = (args.ord || args.ORD || args.soeg || args.soege || args.lookup || args.Lookup || args.word || args.term || '').toString().trim();
 const IGNORE_LOG = LOOKUP.length > 0;
 const erLinuxServer = process.platform === 'linux' && !process.env.DISPLAY;
 const HEADLESS = args.headless === true || erLinuxServer;
@@ -219,6 +219,7 @@ async function vaelgSprog(page, sprogTekst) {
   console.log('  Fandt ' + indlaeg.length + ' ordbogs-indlaeg');
 
   if (LOOKUP) {
+    console.log('  Søger efter ord: "' + LOOKUP + '"');
     const lookupNorm = normalizeText(LOOKUP);
     indlaeg = indlaeg.filter(it => {
       const textNorm = normalizeText(it.tekst);
