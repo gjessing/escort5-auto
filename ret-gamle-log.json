@@ -46,6 +46,20 @@
     "artikel:ctl00_MainContent_LbTopics_i43",
     "artikel:ctl00_MainContent_LbTopics_i44",
     "artikel:ctl00_MainContent_LbTopics_i45",
-    "blog:ctl00_MainContent_LbTopics_i0"
-  ]
+    "blog:ctl00_MainContent_LbTopics_i0",
+    "ordbog:ctl00_MainContent_LbTopics_i0",
+    "ordbog:ctl00_MainContent_LbTopics_i1"
+  ],
+  "detaljer": {
+    "ordbog:ctl00_MainContent_LbTopics_i0": {
+      "ord": "69",
+      "nyTitel": "69 stillingen — hvad er det og hvordan fungerer den?",
+      "dato": "2026-05-01T17:59:53.219Z"
+    },
+    "ordbog:ctl00_MainContent_LbTopics_i1": {
+      "ord": "Ægte kys",
+      "nyTitel": "Ægte kys — hvad betyder det og hvordan bruges det?",
+      "dato": "2026-05-02T12:52:39.848Z"
+    }
+  }
 }

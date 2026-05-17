@@ -4,6 +4,7 @@
 //   node oversaet-ordbog.js --sprog en --max 1
 //   node oversaet-ordbog.js --sprog sv --max 5
 //   node oversaet-ordbog.js --sprog en --max 1 --dry
+//   node oversaet-ordbog.js --sprog en --ord "Dildo show"
 
 import 'dotenv/config';
 import { chromium } from 'playwright';
@@ -15,6 +16,8 @@ const args = minimist(process.argv.slice(2));
 const SPROG_KODE = (args.sprog || args.s || '').toLowerCase();
 const MAX = parsePositiveInt(args.max, 'max', 999);
 const DRY = args.dry === true;
+const LOOKUP = (args.ord || args.soeg || args.soege || args.word || args.term || '').toString().trim();
+const IGNORE_LOG = LOOKUP.length > 0;
 const erLinuxServer = process.platform === 'linux' && !process.env.DISPLAY;
 const HEADLESS = args.headless === true || erLinuxServer;
 const TYPE = 'ordbog'; // Stoetter kun ordbog for nu
@@ -211,11 +214,22 @@ async function vaelgSprog(page, sprogTekst) {
   });
   console.log('  Fandt ' + indlaeg.length + ' ordbogs-indlaeg');
 
+  if (LOOKUP) {
+    const lookupLower = LOOKUP.toLowerCase();
+    indlaeg = indlaeg.filter(it => it.tekst.toLowerCase().includes(lookupLower));
+    console.log('  Filter: viser kun opslag der matcher: "' + LOOKUP + '"');
+    if (indlaeg.length === 0) {
+      console.log('  Ingen opslag fundet for det angivne ord. Kontroller stavning og prøv igen.');
+      await browser.close();
+      process.exit(0);
+    }
+  }
+
   // ── Filtrer behandlede (per sprog) ──
   const log = await laesLogAsync();
   const sprogNoegle = ':' + SPROG_KODE; // fx ":en" eller ":sv"
   const erBehandlet = id => log.behandlet.includes(TYPE + ':' + id + sprogNoegle);
-  const ubehandlede = indlaeg.filter(it => !erBehandlet(it.id));
+  const ubehandlede = indlaeg.filter(it => IGNORE_LOG || !erBehandlet(it.id));
   console.log('  Allerede oversat til ' + sprogInfo.tekst + ': ' + (indlaeg.length - ubehandlede.length));
   console.log('  Tilbage at oversaette: ' + ubehandlede.length + '\n');
 
