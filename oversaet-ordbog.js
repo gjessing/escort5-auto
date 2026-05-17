@@ -35,6 +35,7 @@ function parseLookupFromRawArgv() {
 }
 
 const LOOKUP = RAW_ARG_LOOKUP.trim() || parseLookupFromRawArgv();
+const EFFECTIVE_LOOKUP = LOOKUP;
 const IGNORE_LOG = LOOKUP.length > 0;
 
 // === SPROG-KORTLAEGNING ===
