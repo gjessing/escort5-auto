@@ -20,6 +20,7 @@ const RAW_ARG_LOOKUP = (args.ord || args.ORD || args.soeg || args.soege || args.
 const erLinuxServer = process.platform === 'linux' && !process.env.DISPLAY;
 const HEADLESS = args.headless === true || erLinuxServer;
 const TYPE = 'ordbog'; // Stoetter kun ordbog for nu
+const SCRIPT_ID = 'oversaet-ordbog.js v2';
 
 function normalizeText(str) {
   return (str || '').toString().toLowerCase().replace(/[^a-z0-9æøå]+/g, '');
@@ -174,6 +175,8 @@ async function vaelgSprog(page, sprogTekst) {
 (async () => {
   console.log('\n================================================');
   console.log('  oversaet-ordbog.js — Oversaet til ' + sprogInfo.tekst);
+  console.log('  Script: ' + SCRIPT_ID);
+  console.log('  Raw argv: ' + process.argv.slice(2).join(' '));
   console.log('================================================');
   console.log('Sprog: ' + sprogInfo.tekst + ' | Max: ' + MAX + (DRY ? ' | DRY-RUN' : ''));
   if (LOOKUP) console.log('Søgeord: "' + LOOKUP + '"');
