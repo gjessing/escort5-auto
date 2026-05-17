@@ -38,6 +38,15 @@ const LOOKUP = RAW_ARG_LOOKUP.trim() || parseLookupFromRawArgv();
 const EFFECTIVE_LOOKUP = LOOKUP;
 const IGNORE_LOG = LOOKUP.length > 0;
 
+function decodePercentEncodedHtml(value) {
+  if (!value || !/%3[cC]/.test(value)) return value;
+  try {
+    return decodeURIComponent(value);
+  } catch (_) {
+    return value;
+  }
+}
+
 // === SPROG-KORTLAEGNING ===
 const SPROG = {
   'en':      { tekst: 'Engelsk', navn: 'engelsk', engelsk: 'English' },
@@ -136,6 +145,10 @@ Returner KUN et rent JSON-objekt uden markdown backticks:
   if (typeof parsed.nyTitel !== 'string' || typeof parsed.nyBody !== 'string') {
     throw new Error('Claude API fejl: manglende felter nyTitel/nyBody');
   }
+
+  parsed.nyTitel = decodePercentEncodedHtml(parsed.nyTitel);
+  parsed.nyBody = decodePercentEncodedHtml(parsed.nyBody);
+
   return parsed;
 }
 
