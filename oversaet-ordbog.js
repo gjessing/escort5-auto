@@ -16,8 +16,7 @@ const args = minimist(process.argv.slice(2));
 const SPROG_KODE = (args.sprog || args.s || '').toLowerCase();
 const MAX = parsePositiveInt(args.max, 'max', 999);
 const DRY = args.dry === true;
-const LOOKUP = (args.ord || args.ORD || args.soeg || args.soege || args.lookup || args.Lookup || args.word || args.term || '').toString().trim();
-const IGNORE_LOG = LOOKUP.length > 0;
+const RAW_ARG_LOOKUP = (args.ord || args.ORD || args.soeg || args.soege || args.lookup || args.Lookup || args.word || args.term || '').toString();
 const erLinuxServer = process.platform === 'linux' && !process.env.DISPLAY;
 const HEADLESS = args.headless === true || erLinuxServer;
 const TYPE = 'ordbog'; // Stoetter kun ordbog for nu
@@ -25,6 +24,17 @@ const TYPE = 'ordbog'; // Stoetter kun ordbog for nu
 function normalizeText(str) {
   return (str || '').toString().toLowerCase().replace(/[^a-z0-9æøå]+/g, '');
 }
+
+function parseLookupFromRawArgv() {
+  const raw = process.argv.slice(2).join(' ');
+  const regex = /(?:--|\b)(?:ord|ORD|soeg|soege|lookup|word|term)(?:=|\s+)("([^"]+)"|'([^']+)'|([^\s]+))/;
+  const match = raw.match(regex);
+  if (!match) return '';
+  return (match[2] || match[3] || match[4] || '').trim();
+}
+
+const LOOKUP = RAW_ARG_LOOKUP.trim() || parseLookupFromRawArgv();
+const IGNORE_LOG = LOOKUP.length > 0;
 
 // === SPROG-KORTLAEGNING ===
 const SPROG = {
@@ -166,6 +176,8 @@ async function vaelgSprog(page, sprogTekst) {
   console.log('  oversaet-ordbog.js — Oversaet til ' + sprogInfo.tekst);
   console.log('================================================');
   console.log('Sprog: ' + sprogInfo.tekst + ' | Max: ' + MAX + (DRY ? ' | DRY-RUN' : ''));
+  if (LOOKUP) console.log('Søgeord: "' + LOOKUP + '"');
+  else console.log('Søgeord: ingen');
   console.log('');
 
   const browser = await chromium.launch({ headless: HEADLESS, slowMo: 50 });
@@ -218,14 +230,14 @@ async function vaelgSprog(page, sprogTekst) {
   });
   console.log('  Fandt ' + indlaeg.length + ' ordbogs-indlaeg');
 
-  if (LOOKUP) {
-    console.log('  Søger efter ord: "' + LOOKUP + '"');
-    const lookupNorm = normalizeText(LOOKUP);
+  if (EFFECTIVE_LOOKUP) {
+    console.log('  Søger efter ord: "' + EFFECTIVE_LOOKUP + '"');
+    const lookupNorm = normalizeText(EFFECTIVE_LOOKUP);
     indlaeg = indlaeg.filter(it => {
       const textNorm = normalizeText(it.tekst);
-      return textNorm.includes(lookupNorm) || it.tekst.toLowerCase().includes(LOOKUP.toLowerCase());
+      return textNorm.includes(lookupNorm) || it.tekst.toLowerCase().includes(EFFECTIVE_LOOKUP.toLowerCase());
     });
-    console.log('  Filter: viser kun opslag der matcher: "' + LOOKUP + '"');
+    console.log('  Filter: viser kun opslag der matcher: "' + EFFECTIVE_LOOKUP + '"');
     if (indlaeg.length === 0) {
       console.log('  Ingen opslag fundet for det angivne ord. Kontroller stavning og prøv igen.');
       await browser.close();
