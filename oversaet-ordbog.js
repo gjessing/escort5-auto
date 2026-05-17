@@ -22,6 +22,10 @@ const erLinuxServer = process.platform === 'linux' && !process.env.DISPLAY;
 const HEADLESS = args.headless === true || erLinuxServer;
 const TYPE = 'ordbog'; // Stoetter kun ordbog for nu
 
+function normalizeText(str) {
+  return (str || '').toString().toLowerCase().replace(/[^a-z0-9æøå]+/g, '');
+}
+
 // === SPROG-KORTLAEGNING ===
 const SPROG = {
   'en':      { tekst: 'Engelsk', navn: 'engelsk', engelsk: 'English' },
@@ -200,7 +204,7 @@ async function vaelgSprog(page, sprogTekst) {
   console.log('  OK: Ordbog-kategori valgt');
 
   // ── Hent liste ──
-  const indlaeg = await page.evaluate(() => {
+  let indlaeg = await page.evaluate(() => {
     return Array.from(document.querySelectorAll('li.rlbItem')).map(el => {
       const fulTekst = (el.textContent || '').replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
       const summ = el.querySelector('.summery');
@@ -215,8 +219,11 @@ async function vaelgSprog(page, sprogTekst) {
   console.log('  Fandt ' + indlaeg.length + ' ordbogs-indlaeg');
 
   if (LOOKUP) {
-    const lookupLower = LOOKUP.toLowerCase();
-    indlaeg = indlaeg.filter(it => it.tekst.toLowerCase().includes(lookupLower));
+    const lookupNorm = normalizeText(LOOKUP);
+    indlaeg = indlaeg.filter(it => {
+      const textNorm = normalizeText(it.tekst);
+      return textNorm.includes(lookupNorm) || it.tekst.toLowerCase().includes(LOOKUP.toLowerCase());
+    });
     console.log('  Filter: viser kun opslag der matcher: "' + LOOKUP + '"');
     if (indlaeg.length === 0) {
       console.log('  Ingen opslag fundet for det angivne ord. Kontroller stavning og prøv igen.');
