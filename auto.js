@@ -1,6 +1,18 @@
 // auto.js - Fuldt automatisk: hent sogeord -> generer -> post
 // Brug: node auto.js
 // Eller: node auto.js --antal 3 --dage 90
+import fs from 'fs';
+
+const DAEKKEDE_FIL = 'skrevne-sogeord.json';
+function hentDaekkede() {
+  try { return new Set(JSON.parse(fs.readFileSync(DAEKKEDE_FIL, 'utf8'))); }
+  catch { return new Set(); }
+}
+function gemDaekket(sogeord) {
+  const sat = hentDaekkede();
+  sat.add(sogeord);
+  fs.writeFileSync(DAEKKEDE_FIL, JSON.stringify([...sat], null, 2));
+}
 function mulighedsScore(visninger, position) {
   let faktor;
   if (position <= 3)       faktor = 0.1;  // vinder allerede – nedprioritér
@@ -8,6 +20,22 @@ function mulighedsScore(visninger, position) {
   else if (position <= 20) faktor = 1.5;  // side 2 – størst upside
   else                     faktor = 0.5;  // langt væk – svært at rykke
   return Math.round(visninger * faktor);
+}
+function langhaleFaktor(sogeord) {
+  const ord = sogeord.trim().split(/\s+/).length;
+  if (ord >= 3) return 1.5;   // lang-hale = lav konkurrence
+  if (ord === 2) return 1.0;
+  return 0.5;                 // enkelt head-term = høj konkurrence
+}
+function positionsFaktor(position) {
+  if (position <= 3)  return 0.2;   // vinder allerede
+  if (position <= 10) return 1.0;   // tæt på
+  if (position <= 20) return 1.5;   // side 2 – størst upside
+  return 0.6;
+}
+function beregnScore(row) {
+  const efterspoergsel = Math.log10(row.impressions + 1); // dæmper mega-termer
+  return Math.round(efterspoergsel * positionsFaktor(row.position) * langhaleFaktor(row.keys[0]) * 100);
 }
 
 function vaelgBedsteSogeord(rows, antal) {
@@ -42,50 +70,23 @@ const { LOGIN_URL, ADMIN_URL, USERNAME, PASSWORD, ANTHROPIC_API_KEY } = process.
 assertRequiredEnv(['LOGIN_URL', 'ADMIN_URL', 'USERNAME', 'PASSWORD', 'ANTHROPIC_API_KEY']);
 
 // ── Hent top sogeord fra Search Console ───────────────────────────────────────
-async function hentTopSogeord(antal, dage) {
-  console.log('\nHenter sogeord fra Search Console...');
+const daekkede = hentDaekkede();
+const rows = res.data.rows || [];
+const muligheder = rows
+  .filter(r => r.impressions >= 30 && r.position > 3 && !daekkede.has(r.keys[0]))
+  .map(r => ({ row: r, score: beregnScore(r) }))
+  .sort((a, b) => b.score - a.score)
+  .slice(0, antal)
+  .map(x => x.row);
 
-  const credentialsPath = process.env.GOOGLE_CREDENTIALS;
-  if (!credentialsPath) throw new Error('GOOGLE_CREDENTIALS mangler. Angiv sti til credentials-fil i .env');
-  const auth = new google.auth.GoogleAuth({
-    keyFile: credentialsPath,
-    scopes: ['https://www.googleapis.com/auth/webmasters.readonly'],
-  });
-  const searchconsole = google.searchconsole({ version: 'v1', auth });
+if (muligheder.length === 0) throw new Error('Ingen muligheder. Proev --dage 180 eller nulstil skrevne-sogeord.json');
 
-  const slutDato = new Date();
-  const startDato = new Date();
-  startDato.setDate(slutDato.getDate() - dage);
-  const format = d => d.toISOString().split('T')[0];
+console.log('  Fandt ' + muligheder.length + ' sogeord (mulighedsscore):');
+muligheder.forEach((r, i) => {
+  console.log('  ' + (i+1) + '. "' + r.keys[0] + '" (' + Math.round(r.impressions) + ' visn., pos ' + r.position.toFixed(1) + ', score ' + beregnScore(r) + ')');
+});
 
-  const res = await searchconsole.searchanalytics.query({
-    siteUrl: SITE,
-    requestBody: {
-      startDate: format(startDato),
-      endDate: format(slutDato),
-      dimensions: ['query'],
-      rowLimit: 500,
-      dimensionFilterGroups: [{
-        filters: [{ dimension: 'country', operator: 'equals', expression: 'dnk' }]
-      }]
-    }
-  });
-
-  const rows = res.data.rows || [];
-  const muligheder = rows
-    .filter(r => r.impressions >= 50 && r.ctr < 0.05 && r.position > 5)
-    .sort((a, b) => mulighedsScore(b.impressions, b.position) - mulighedsScore(a.impressions, a.position))
-    .slice(0, antal);
-
-  if (muligheder.length === 0) throw new Error('Ingen artikelmuligheder fundet. Proev --dage 180');
-
-  console.log('  Fandt ' + muligheder.length + ' sogeord:');
-  muligheder.forEach((r, i) => {
-    console.log('  ' + (i+1) + '. "' + r.keys[0] + '" (' + Math.round(r.impressions) + ' visninger, pos ' + r.position.toFixed(1) + ', score ' + mulighedsScore(r.impressions, r.position) + ')');
-  });
-
-  return muligheder.map(r => r.keys[0]);
-}
+return muligheder.map(r => r.keys[0]);
 
 // ── Generer artikel via Claude API ────────────────────────────────────────────
 async function genererArtikel(sogeord) {
@@ -294,6 +295,7 @@ async function postArtikel(artikel) {
       console.log('='.repeat(50));
       const artikel = await genererArtikel(s);
       await postArtikel(artikel);
+      gemDaekket(s);   // husk emnet, så det ikke vælges igen
       if (sogeord.length > 1) await new Promise(r => setTimeout(r, 3000));
     }
     console.log('\nFaerdig! ' + sogeord.length + ' artikel(er) oprettet og gemt.');
