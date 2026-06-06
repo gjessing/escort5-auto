@@ -5,12 +5,14 @@ import fs from 'fs';
 
 const DAEKKEDE_FIL = 'skrevne-sogeord.json';
 function hentDaekkede() {
-  try { return new Set(JSON.parse(fs.readFileSync(DAEKKEDE_FIL, 'utf8'))); }
-  catch { return new Set(); }
+  try {
+    const arr = JSON.parse(fs.readFileSync(DAEKKEDE_FIL, 'utf8'));
+    return new Set(arr.map(normaliser));
+  } catch { return new Set(); }
 }
 function gemDaekket(sogeord) {
   const sat = hentDaekkede();
-  sat.add(sogeord);
+  sat.add(normaliser(sogeord));
   fs.writeFileSync(DAEKKEDE_FIL, JSON.stringify([...sat], null, 2));
 }
 function mulighedsScore(visninger, position) {
@@ -37,7 +39,9 @@ function beregnScore(row) {
   const efterspoergsel = Math.log10(row.impressions + 1); // dæmper mega-termer
   return Math.round(efterspoergsel * positionsFaktor(row.position) * langhaleFaktor(row.keys[0]) * 100);
 }
-
+function normaliser(sogeord) {
+  return sogeord.toLowerCase().trim().split(/\s+/).sort().join(' ');
+}
 
 import 'dotenv/config';
 import { google } from 'googleapis';
@@ -87,15 +91,21 @@ async function hentTopSogeord(antal, dage) {
       }]
     }
   });
-
-  const daekkede = hentDaekkede();
-  const rows = res.data.rows || [];
-  const muligheder = rows
-    .filter(r => r.impressions >= 30 && r.position > 3 && !daekkede.has(r.keys[0]))
-    .map(r => ({ row: r, score: beregnScore(r) }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, antal)
-    .map(x => x.row);
+const daekkede = hentDaekkede();
+const rows = res.data.rows || [];
+const setValgt = new Set();
+const muligheder = rows
+  .filter(r => r.impressions >= 30 && r.position > 3 && !daekkede.has(normaliser(r.keys[0])))
+  .map(r => ({ row: r, score: beregnScore(r) }))
+  .sort((a, b) => b.score - a.score)
+  .filter(x => {
+    const nf = normaliser(x.row.keys[0]);
+    if (setValgt.has(nf)) return false;   // spring nær-dublet i samme batch over
+    setValgt.add(nf);
+    return true;
+  })
+  .slice(0, antal)
+  .map(x => x.row);
 
   if (muligheder.length === 0) throw new Error('Ingen muligheder. Proev --dage 180 eller nulstil skrevne-sogeord.json');
 
