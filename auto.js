@@ -1,7 +1,27 @@
 // auto.js - Fuldt automatisk: hent sogeord -> generer -> post
 // Brug: node auto.js
 // Eller: node auto.js --antal 3 --dage 90
+function mulighedsScore(visninger, position) {
+  let faktor;
+  if (position <= 3)       faktor = 0.1;  // vinder allerede – nedprioritér
+  else if (position <= 10) faktor = 1.0;  // tæt på – skub den
+  else if (position <= 20) faktor = 1.5;  // side 2 – størst upside
+  else                     faktor = 0.5;  // langt væk – svært at rykke
+  return Math.round(visninger * faktor);
+}
 
+function vaelgBedsteSogeord(rows, antal) {
+  return rows
+    .map(r => {
+      const sogeord  = r.keys[0];
+      const visninger = r.impressions;
+      const position  = r.position;
+      return { sogeord, visninger, position, score: mulighedsScore(visninger, position) };
+    })
+    .filter(k => k.position > 3)        // spring dem over du allerede vinder
+    .sort((a, b) => b.score - a.score)  // bedste mulighed først
+    .slice(0, antal);
+}
 import 'dotenv/config';
 import { google } from 'googleapis';
 import { chromium } from 'playwright';
@@ -54,14 +74,14 @@ async function hentTopSogeord(antal, dage) {
   const rows = res.data.rows || [];
   const muligheder = rows
     .filter(r => r.impressions >= 50 && r.ctr < 0.05 && r.position > 5)
-    .sort((a, b) => (b.impressions * (1 - b.ctr)) - (a.impressions * (1 - a.ctr)))
+    .sort((a, b) => mulighedsScore(b.impressions, b.position) - mulighedsScore(a.impressions, a.position))
     .slice(0, antal);
 
   if (muligheder.length === 0) throw new Error('Ingen artikelmuligheder fundet. Proev --dage 180');
 
   console.log('  Fandt ' + muligheder.length + ' sogeord:');
   muligheder.forEach((r, i) => {
-    console.log('  ' + (i+1) + '. "' + r.keys[0] + '" (' + Math.round(r.impressions) + ' visninger, pos ' + r.position.toFixed(1) + ')');
+    console.log('  ' + (i+1) + '. "' + r.keys[0] + '" (' + Math.round(r.impressions) + ' visninger, pos ' + r.position.toFixed(1) + ', score ' + mulighedsScore(r.impressions, r.position) + ')');
   });
 
   return muligheder.map(r => r.keys[0]);
