@@ -38,18 +38,7 @@ function beregnScore(row) {
   return Math.round(efterspoergsel * positionsFaktor(row.position) * langhaleFaktor(row.keys[0]) * 100);
 }
 
-function vaelgBedsteSogeord(rows, antal) {
-  return rows
-    .map(r => {
-      const sogeord  = r.keys[0];
-      const visninger = r.impressions;
-      const position  = r.position;
-      return { sogeord, visninger, position, score: mulighedsScore(visninger, position) };
-    })
-    .filter(k => k.position > 3)        // spring dem over du allerede vinder
-    .sort((a, b) => b.score - a.score)  // bedste mulighed først
-    .slice(0, antal);
-}
+
 import 'dotenv/config';
 import { google } from 'googleapis';
 import { chromium } from 'playwright';
@@ -70,23 +59,53 @@ const { LOGIN_URL, ADMIN_URL, USERNAME, PASSWORD, ANTHROPIC_API_KEY } = process.
 assertRequiredEnv(['LOGIN_URL', 'ADMIN_URL', 'USERNAME', 'PASSWORD', 'ANTHROPIC_API_KEY']);
 
 // ── Hent top sogeord fra Search Console ───────────────────────────────────────
-const daekkede = hentDaekkede();
-const rows = res.data.rows || [];
-const muligheder = rows
-  .filter(r => r.impressions >= 30 && r.position > 3 && !daekkede.has(r.keys[0]))
-  .map(r => ({ row: r, score: beregnScore(r) }))
-  .sort((a, b) => b.score - a.score)
-  .slice(0, antal)
-  .map(x => x.row);
+async function hentTopSogeord(antal, dage) {
+  console.log('\nHenter sogeord fra Search Console...');
 
-if (muligheder.length === 0) throw new Error('Ingen muligheder. Proev --dage 180 eller nulstil skrevne-sogeord.json');
+  const credentialsPath = process.env.GOOGLE_CREDENTIALS;
+  if (!credentialsPath) throw new Error('GOOGLE_CREDENTIALS mangler. Angiv sti til credentials-fil i .env');
+  const auth = new google.auth.GoogleAuth({
+    keyFile: credentialsPath,
+    scopes: ['https://www.googleapis.com/auth/webmasters.readonly'],
+  });
+  const searchconsole = google.searchconsole({ version: 'v1', auth });
 
-console.log('  Fandt ' + muligheder.length + ' sogeord (mulighedsscore):');
-muligheder.forEach((r, i) => {
-  console.log('  ' + (i+1) + '. "' + r.keys[0] + '" (' + Math.round(r.impressions) + ' visn., pos ' + r.position.toFixed(1) + ', score ' + beregnScore(r) + ')');
-});
+  const slutDato = new Date();
+  const startDato = new Date();
+  startDato.setDate(slutDato.getDate() - dage);
+  const format = d => d.toISOString().split('T')[0];
 
-return muligheder.map(r => r.keys[0]);
+  const res = await searchconsole.searchanalytics.query({
+    siteUrl: SITE,
+    requestBody: {
+      startDate: format(startDato),
+      endDate: format(slutDato),
+      dimensions: ['query'],
+      rowLimit: 500,
+      dimensionFilterGroups: [{
+        filters: [{ dimension: 'country', operator: 'equals', expression: 'dnk' }]
+      }]
+    }
+  });
+
+  const daekkede = hentDaekkede();
+  const rows = res.data.rows || [];
+  const muligheder = rows
+    .filter(r => r.impressions >= 30 && r.position > 3 && !daekkede.has(r.keys[0]))
+    .map(r => ({ row: r, score: beregnScore(r) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, antal)
+    .map(x => x.row);
+
+  if (muligheder.length === 0) throw new Error('Ingen muligheder. Proev --dage 180 eller nulstil skrevne-sogeord.json');
+
+  console.log('  Fandt ' + muligheder.length + ' sogeord (mulighedsscore):');
+  muligheder.forEach((r, i) => {
+    console.log('  ' + (i+1) + '. "' + r.keys[0] + '" (' + Math.round(r.impressions) + ' visn., pos ' + r.position.toFixed(1) + ', score ' + beregnScore(r) + ')');
+  });
+
+  return muligheder.map(r => r.keys[0]);
+}
 
 // ── Generer artikel via Claude API ────────────────────────────────────────────
 async function genererArtikel(sogeord) {
