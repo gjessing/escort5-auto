@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 /**
  * quick-wins-update.js (FIXED)
  * Updates escort5.dk article titles/meta for Quick Wins keywords
@@ -29,7 +31,7 @@ const QUICK_WINS = [
     keyword: "eskortepiger",
     article: "Escort Piger - Find Danmarks Bedste Escorts",
     title: "Eskortepiger i Danmark - Køb Escort Online",
-    meta: "Find eskortepiger i Danmark. Diskret møte, professionel service. Book direkte online. Samme dag levering til hele landet.",
+    meta: "Find eskortepiger i Danmark. Diskret møde, professionel service. Book direkte online. Samme dag levering til hele landet.",
   },
 ];
 
