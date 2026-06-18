@@ -30,7 +30,7 @@ const RESTORE_LIST = [
     restoreMeta: "",
   },
   {
-    searchFor: "Escortpiger i Danmark - Køb Escort Online eroguide",
+    searchFor: "Eskortepiger i Danmark - Køb Escort Online eroguide",
     restoreTitle: "Eroguide anmeldelser af escort piger",
     restoreMeta: "",
   },
