@@ -104,16 +104,6 @@ async function findAndRestoreArticle(page, searchTerm, restoreTitle, restoreMeta
     return false;
   }
   
-  // Clear meta
-  const metaField = "#ctl00_MainContent_TbMetaDescription";
-  try {
-    await page.click(metaField, { clickCount: 3 });
-    await page.press(metaField, "Backspace");
-    console.log(`     ✅ Meta cleared`);
-  } catch (e) {
-    console.log(`     ⚠️  Could not clear meta: ${e.message}`);
-  }
-  
   // Save
   if (!DRY_RUN) {
     console.log(`   Saving...`);
@@ -184,12 +174,6 @@ async function main() {
       const result = await findAndRestoreArticle(page, item.searchFor, item.restoreTitle, item.restoreMeta);
       if (result) restored++;
       await page.waitForTimeout(2000);
-      
-      // Re-navigate to admin after each save to refresh state
-      if (!DRY_RUN) {
-        await page.goto(ADMIN_URL, { waitUntil: 'networkidle' });
-        await page.waitForTimeout(1000);
-      }
     }
     
     console.log('\n' + '='.repeat(80));
