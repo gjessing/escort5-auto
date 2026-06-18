@@ -104,6 +104,16 @@ async function findAndRestoreArticle(page, searchTerm, restoreTitle, restoreMeta
     return false;
   }
   
+  // Clear meta
+  const metaField = "#ctl00_MainContent_TbMetaDescription";
+  try {
+    await page.click(metaField, { clickCount: 3 });
+    await page.press(metaField, "Backspace");
+    console.log(`     ✅ Meta cleared`);
+  } catch (e) {
+    console.log(`     ⚠️  Could not clear meta: ${e.message}`);
+  }
+  
   // Save
   if (!DRY_RUN) {
     console.log(`   Saving...`);
