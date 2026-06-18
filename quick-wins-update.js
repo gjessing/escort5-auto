@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
 /**
- * quick-wins-update.js (MULTI-SITE)
+ * quick-wins-update.js (FIXED MATCHING)
  * Updates escort5.dk AND escort.se article titles/meta
- * Handles both sites - auto-detects from env var SITE_URL
+ * NOW: Uses exact title matching from the debug list
  */
 
 import 'dotenv/config';
@@ -12,7 +12,7 @@ import minimist from 'minimist';
 
 const args = minimist(process.argv.slice(2));
 const KEYWORD = args.keyword || null;
-const SITE = args.site || null; // 'dk' or 'se'
+const SITE = args.site || null;
 const DRY_RUN = args['dry-run'] === true || args.dry === true;
 const HEADLESS = args.headless !== false;
 
@@ -23,34 +23,32 @@ if (!LOGIN_URL || !ADMIN_URL || !USERNAME || !PASSWORD) {
   process.exit(1);
 }
 
-// Detect site from SITE_URL or args
 const detectedSite = SITE || (SITE_URL?.includes('.se') ? 'se' : 'dk');
 
 /**
- * Quick Wins for escort5.dk
- */
-const QUICK_WINS_DK = [
-  {
-    keyword: "eskortepiger",
-    article: "Escort Piger - Find Danmarks Bedste Escorts",
-    title: "Escortpiger i Danmark - Køb Escort Online",
-    meta: "Find escortpiger i Danmark. Diskret møde, professionel service. Book direkte online. Samme dag levering til hele landet.",
-  },
-];
+ /**
+  * Quick Wins for escort5.dk
+  */
+ const QUICK_WINS_DK = [
+   {
+     keyword: "eskortepiger",
+     // Search for just "Escort Piger" - the start of the real article title
+     searchTerm: "Escort Piger - Find Danmarks",
+     title: "Escortpiger i Danmark - Køb Escort Online",
+     meta: "Find escortpiger i Danmark. Diskret møde, professionel service. Book direkte online. Samme dag levering til hele landet.",
+   },
+ ];
 
-/**
- * Quick Wins for escort.se
- */
 const QUICK_WINS_SE = [
   {
     keyword: "eskort guide",
-    article: "Eskort Guide Sverige",
+    searchTerm: "Eskort Guide Sverige",
     title: "Eskort Guide Sverige - Hitta Escorttjej Online",
     meta: "Eskort guide för Sverige. Hitta perfekt eskorttjej. Diskret bokring, professionell service. Alla regioner. Klicka här!",
   },
   {
     keyword: "sex tjejer i örebro",
-    article: "Sex Tjejer Örebro",
+    searchTerm: "Sex Tjejer Örebro",
     title: "Sex Tjejer Örebro - Book Direkt Online Nu",
     meta: "Sex tjejer i Örebro ready now! Diskret möte, professionell service. Many girls available. Book online instantly!",
   },
@@ -58,15 +56,15 @@ const QUICK_WINS_SE = [
 
 const QUICK_WINS = detectedSite === 'se' ? QUICK_WINS_SE : QUICK_WINS_DK;
 
-async function updateKeyword(page, keyword, articleTitle, newTitle, newMeta) {
+async function updateKeyword(page, keyword, searchTerm, newTitle, newMeta) {
   console.log(`\n📝 Updating keyword: "${keyword}"`);
-  console.log(`   Article: "${articleTitle}"`);
+  console.log(`   Searching for: "${searchTerm}"`);
   
   // Gå til AdminTopics
   console.log("   Navigating to AdminTopics...");
   await page.goto(ADMIN_URL, { waitUntil: 'networkidle' });
   
-  // Find artiklen i listen
+  // Get all items
   const items = await page.evaluate(() => {
     return Array.from(document.querySelectorAll('li.rlbItem')).map(el => {
       const tekst = (el.textContent || '').replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -74,27 +72,38 @@ async function updateKeyword(page, keyword, articleTitle, newTitle, newMeta) {
     });
   });
   
-  // Find best match
+  // Find exact or best match
   let bestMatch = null;
   let bestScore = 0;
   
   for (const item of items) {
     const itemLower = item.toLowerCase();
-    const searchLower = articleTitle.toLowerCase();
+    const searchLower = searchTerm.toLowerCase();
     
     let score = 0;
-    // Eksakt match
-    if (itemLower === searchLower) score = 1000;
-    // Indeholder hele søgeord
-    else if (itemLower.includes(searchLower)) score = 500;
-    // Starter med søgeord
-    else if (itemLower.startsWith(searchLower)) score = 400;
-    // Begge ord fra artikeltitel (f.eks "escort" AND "piger")
+    
+    // Eksakt match (hele tingen)
+    if (itemLower === searchLower) {
+      score = 10000;
+    }
+    // Start match (søgetermet starter artiklen)
+    else if (itemLower.startsWith(searchLower)) {
+      score = 5000;
+    }
+    // Indeholder søgetermet som første del
+    else if (itemLower.includes(searchLower)) {
+      score = 3000;
+    }
+    // Alle ord fra søgetermet findes
     else {
       const searchWords = searchLower.split(' ').filter(w => w.length > 2);
-      const matchCount = searchWords.filter(w => itemLower.includes(w)).length;
-      if (matchCount === searchWords.length && searchWords.length > 1) score = 300;
-      else if (matchCount > 0) score = 10 * matchCount;
+      const foundWords = searchWords.filter(w => itemLower.includes(w));
+      
+      if (foundWords.length === searchWords.length && searchWords.length >= 2) {
+        score = 2000;
+      } else if (foundWords.length > 0) {
+        score = 100 * foundWords.length;
+      }
     }
     
     if (score > bestScore) {
@@ -105,10 +114,14 @@ async function updateKeyword(page, keyword, articleTitle, newTitle, newMeta) {
   
   if (!bestMatch) {
     console.log(`   ❌ Article not found`);
+    console.log(`   Available articles:`);
+    items.slice(0, 10).forEach((item, i) => {
+      console.log(`     ${i + 1}. ${item.substring(0, 70)}`);
+    });
     return false;
   }
   
-  console.log(`   ✅ Found: "${bestMatch.substring(0, 60)}"`);
+  console.log(`   ✅ Found: "${bestMatch.substring(0, 70)}"`);
   
   // Klik på artiklen
   const allItems = await page.locator('li.rlbItem').all();
@@ -116,7 +129,7 @@ async function updateKeyword(page, keyword, articleTitle, newTitle, newMeta) {
   
   for (const item of allItems) {
     const text = await item.textContent();
-    if (text.includes(bestMatch.substring(0, 30))) {
+    if (text && text.includes(bestMatch.substring(0, 40))) {
       await item.click();
       found = true;
       break;
@@ -129,6 +142,7 @@ async function updateKeyword(page, keyword, articleTitle, newTitle, newMeta) {
   }
   
   await page.waitForLoadState('networkidle');
+  await page.waitForTimeout(1000);
   
   // Update title field
   console.log("   Updating title...");
@@ -193,7 +207,6 @@ async function main() {
   
   if (DRY_RUN) console.log('⚠️  DRY-RUN MODE (not saving)\n');
   
-  // Filter keywords
   let toUpdate = QUICK_WINS;
   if (KEYWORD) {
     toUpdate = QUICK_WINS.filter(k => k.keyword.toLowerCase().includes(KEYWORD.toLowerCase()));
@@ -220,14 +233,12 @@ async function main() {
     console.log('\n🔐 Logging in...');
     await page.goto(LOGIN_URL, { waitUntil: 'networkidle' });
     
-    // Accept cookies
     const cookieBtn = page.locator('#cbConfirm');
     if (await cookieBtn.count() > 0) {
       await cookieBtn.click();
       await page.waitForTimeout(500);
     }
     
-    // Fill credentials
     await page.click('#ctl00_MainContent_LfLogin_LoginMain_UserName', { clickCount: 3 });
     await page.keyboard.press('Backspace');
     await page.type('#ctl00_MainContent_LfLogin_LoginMain_UserName', USERNAME, { delay: 60 });
@@ -236,7 +247,6 @@ async function main() {
     await page.keyboard.press('Backspace');
     await page.type('#ctl00_MainContent_LfLogin_LoginMain_Password', PASSWORD, { delay: 60 });
     
-    // Click login
     await Promise.all([
       page.waitForNavigation({ waitUntil: 'networkidle', timeout: 10000 }).catch(() => {}),
       page.click('#ctl00_MainContent_LfLogin_LoginMain_BtnLogin'),
@@ -248,10 +258,9 @@ async function main() {
     
     console.log('✅ Logged in!\n');
     
-    // Update keywords
     let success = 0;
     for (const item of toUpdate) {
-      const result = await updateKeyword(page, item.keyword, item.article, item.title, item.meta);
+      const result = await updateKeyword(page, item.keyword, item.searchTerm, item.title, item.meta);
       if (result) success++;
       await page.waitForTimeout(2000);
     }
