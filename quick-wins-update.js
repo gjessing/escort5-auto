@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
 /**
- * quick-wins-update.js (FIXED)
- * Updates escort5.dk article titles/meta for Quick Wins keywords
- * Now searches for actual article titles on the site
+ * quick-wins-update.js (MULTI-SITE)
+ * Updates escort5.dk AND escort.se article titles/meta
+ * Handles both sites - auto-detects from env var SITE_URL
  */
 
 import 'dotenv/config';
@@ -12,21 +12,24 @@ import minimist from 'minimist';
 
 const args = minimist(process.argv.slice(2));
 const KEYWORD = args.keyword || null;
+const SITE = args.site || null; // 'dk' or 'se'
 const DRY_RUN = args['dry-run'] === true || args.dry === true;
-const HEADLESS = args.headless !== false; // Default: true (headless)
+const HEADLESS = args.headless !== false;
 
-const { LOGIN_URL, ADMIN_URL, USERNAME, PASSWORD } = process.env;
+const { LOGIN_URL, ADMIN_URL, USERNAME, PASSWORD, SITE_URL } = process.env;
 
 if (!LOGIN_URL || !ADMIN_URL || !USERNAME || !PASSWORD) {
   console.error('❌ Missing env vars: LOGIN_URL, ADMIN_URL, USERNAME, PASSWORD');
   process.exit(1);
 }
 
+// Detect site from SITE_URL or args
+const detectedSite = SITE || (SITE_URL?.includes('.se') ? 'se' : 'dk');
+
 /**
- * Quick Wins keywords to update
- * Format: { keyword: "search term", article: "actual article title from site", title: "new title", meta: "new meta" }
+ * Quick Wins for escort5.dk
  */
-const QUICK_WINS = [
+const QUICK_WINS_DK = [
   {
     keyword: "eskortepiger",
     article: "Escort Piger - Find Danmarks Bedste Escorts",
@@ -34,6 +37,26 @@ const QUICK_WINS = [
     meta: "Find eskortepiger i Danmark. Diskret møde, professionel service. Book direkte online. Samme dag levering til hele landet.",
   },
 ];
+
+/**
+ * Quick Wins for escort.se
+ */
+const QUICK_WINS_SE = [
+  {
+    keyword: "eskort guide",
+    article: "Eskort Guide Sverige",
+    title: "Eskort Guide Sverige - Hitta Escorttjej Online",
+    meta: "Eskort guide för Sverige. Hitta perfekt eskorttjej. Diskret bokring, professionell service. Alla regioner. Klicka här!",
+  },
+  {
+    keyword: "sex tjejer i örebro",
+    article: "Sex Tjejer Örebro",
+    title: "Sex Tjejer Örebro - Book Direkt Online Nu",
+    meta: "Sex tjejer i Örebro ready now! Diskret möte, professionell service. Many girls available. Book online instantly!",
+  },
+];
+
+const QUICK_WINS = detectedSite === 'se' ? QUICK_WINS_SE : QUICK_WINS_DK;
 
 async function updateKeyword(page, keyword, articleTitle, newTitle, newMeta) {
   console.log(`\n📝 Updating keyword: "${keyword}"`);
@@ -59,11 +82,10 @@ async function updateKeyword(page, keyword, articleTitle, newTitle, newMeta) {
     const itemLower = item.toLowerCase();
     const searchLower = articleTitle.toLowerCase();
 
-    // Scoring: eksakt > starter med > indeholder
     let score = 0;
     if (itemLower.includes(searchLower)) score = 100;
-    else if (itemLower.includes("escort piger") && searchLower.includes("escort piger")) score = 90;
-    else if (itemLower.includes("escort") && itemLower.includes("piger")) score = 50;
+    else if (itemLower.split(' ').some(w => searchLower.includes(w) && w.length > 3)) score = 50;
+    else if (itemLower.includes(articleTitle.split(' ')[0].toLowerCase())) score = 25;
 
     if (score > bestScore) {
       bestScore = score;
@@ -156,7 +178,7 @@ async function updateKeyword(page, keyword, articleTitle, newTitle, newMeta) {
 
 async function main() {
   console.log('\n' + '='.repeat(80));
-  console.log('🚀 QUICK WINS UPDATE');
+  console.log(`🚀 QUICK WINS UPDATE (${detectedSite.toUpperCase()})`);
   console.log('='.repeat(80));
 
   if (DRY_RUN) console.log('⚠️  DRY-RUN MODE (not saving)\n');
