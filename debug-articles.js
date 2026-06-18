@@ -16,7 +16,7 @@ if (!LOGIN_URL || !ADMIN_URL || !USERNAME || !PASSWORD) {
 (async () => {
     console.log('\n🔍 DEBUG: Listing all articles\n');
 
-    const browser = await chromium.launch({ headless: false, slowMo: 50 });
+    const browser = await chromium.launch({ headless: true, slowMo: 50 });
     const page = await browser.newPage();
 
     try {
