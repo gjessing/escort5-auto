@@ -83,9 +83,19 @@ async function updateKeyword(page, keyword, articleTitle, newTitle, newMeta) {
     const searchLower = articleTitle.toLowerCase();
     
     let score = 0;
-    if (itemLower.includes(searchLower)) score = 100;
-    else if (itemLower.split(' ').some(w => searchLower.includes(w) && w.length > 3)) score = 50;
-    else if (itemLower.includes(articleTitle.split(' ')[0].toLowerCase())) score = 25;
+    // Eksakt match
+    if (itemLower === searchLower) score = 1000;
+    // Indeholder hele søgeord
+    else if (itemLower.includes(searchLower)) score = 500;
+    // Starter med søgeord
+    else if (itemLower.startsWith(searchLower)) score = 400;
+    // Begge ord fra artikeltitel (f.eks "escort" AND "piger")
+    else {
+      const searchWords = searchLower.split(' ').filter(w => w.length > 2);
+      const matchCount = searchWords.filter(w => itemLower.includes(w)).length;
+      if (matchCount === searchWords.length && searchWords.length > 1) score = 300;
+      else if (matchCount > 0) score = 10 * matchCount;
+    }
     
     if (score > bestScore) {
       bestScore = score;
