@@ -1,12 +1,7 @@
-#!/usr/bin/env node
-
 /**
- * quick-wins-update.js
+ * quick-wins-update.js (FIXED)
  * Updates escort5.dk article titles/meta for Quick Wins keywords
- * Based on ret-gamle.js pattern
- * 
- * Usage: node quick-wins-update.js --keyword "eskortepiger" --dry-run
- *        node quick-wins-update.js  (updates all 4)
+ * Now searches for actual article titles on the site
  */
 
 import 'dotenv/config';
@@ -16,8 +11,7 @@ import minimist from 'minimist';
 const args = minimist(process.argv.slice(2));
 const KEYWORD = args.keyword || null;
 const DRY_RUN = args['dry-run'] === true || args.dry === true;
-const erLinuxServer = process.platform === 'linux' && !process.env.DISPLAY;
-const HEADLESS = args.headless === true || erLinuxServer;
+const HEADLESS = args.headless !== false; // Default: true (headless)
 
 const { LOGIN_URL, ADMIN_URL, USERNAME, PASSWORD } = process.env;
 
@@ -28,39 +22,26 @@ if (!LOGIN_URL || !ADMIN_URL || !USERNAME || !PASSWORD) {
 
 /**
  * Quick Wins keywords to update
- * Format: { keyword: "term", title: "new title", meta: "new meta" }
+ * Format: { keyword: "search term", article: "actual article title from site", title: "new title", meta: "new meta" }
  */
 const QUICK_WINS = [
   {
     keyword: "eskortepiger",
+    article: "Escort Piger - Find Danmarks Bedste Escorts",
     title: "Eskortepiger i Danmark - Køb Escort Online",
     meta: "Find eskortepiger i Danmark. Diskret møte, professionel service. Book direkte online. Samme dag levering til hele landet.",
   },
 ];
 
-// Add escort.se keywords if domain is escort.se
-if ((process.env.SITE_URL || '').includes('.se')) {
-  QUICK_WINS.push({
-    keyword: "eskort guide",
-    title: "Eskort Guide Sverige - Hitta Escorttjej Online",
-    meta: "Eskort guide för Sverige. Hitta perfekt eskorttjej. Diskret bokring, professionell service. Alla regioner. Klicka här!",
-  });
-  QUICK_WINS.push({
-    keyword: "sex tjejer i örebro",
-    title: "Sex Tjejer Örebro - Book Direkt Online Nu",
-    meta: "Sex tjejer i Örebro ready now! Diskret möte, professionell service. Many girls available. Book online instantly!",
-  });
-}
-
-async function updateKeyword(page, keyword, title, meta) {
+async function updateKeyword(page, keyword, articleTitle, newTitle, newMeta) {
   console.log(`\n📝 Updating keyword: "${keyword}"`);
+  console.log(`   Article: "${articleTitle}"`);
 
   // Gå til AdminTopics
-  console.log("  Navigating to AdminTopics...");
+  console.log("   Navigating to AdminTopics...");
   await page.goto(ADMIN_URL, { waitUntil: 'networkidle' });
 
-  // Find og klik på artiklen via søgefunktionen (samme som ret-gamle.js)
-  // Søg efter keyword i listen
+  // Find artiklen i listen
   const items = await page.evaluate(() => {
     return Array.from(document.querySelectorAll('li.rlbItem')).map(el => {
       const tekst = (el.textContent || '').replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -68,21 +49,19 @@ async function updateKeyword(page, keyword, title, meta) {
     });
   });
 
-  console.log(`  Found ${items.length} items in list`);
-
   // Find best match
   let bestMatch = null;
   let bestScore = 0;
 
   for (const item of items) {
     const itemLower = item.toLowerCase();
-    const keywordLower = keyword.toLowerCase();
+    const searchLower = articleTitle.toLowerCase();
 
     // Scoring: eksakt > starter med > indeholder
     let score = 0;
-    if (itemLower === keywordLower) score = 100;
-    else if (itemLower.startsWith(keywordLower)) score = 50;
-    else if (itemLower.includes(keywordLower)) score = 25;
+    if (itemLower.includes(searchLower)) score = 100;
+    else if (itemLower.includes("escort piger") && searchLower.includes("escort piger")) score = 90;
+    else if (itemLower.includes("escort") && itemLower.includes("piger")) score = 50;
 
     if (score > bestScore) {
       bestScore = score;
@@ -91,66 +70,84 @@ async function updateKeyword(page, keyword, title, meta) {
   }
 
   if (!bestMatch) {
-    console.log(`  ❌ Article not found for "${keyword}"`);
+    console.log(`   ❌ Article not found`);
     return false;
   }
 
-  console.log(`  ✅ Found article: "${bestMatch.substring(0, 60)}"`);
+  console.log(`   ✅ Found: "${bestMatch.substring(0, 60)}"`);
 
   // Klik på artiklen
-  await page.click(`li.rlbItem:has-text("${bestMatch}")`);
+  const allItems = await page.locator('li.rlbItem').all();
+  let found = false;
+
+  for (const item of allItems) {
+    const text = await item.textContent();
+    if (text.includes(bestMatch.substring(0, 30))) {
+      await item.click();
+      found = true;
+      break;
+    }
+  }
+
+  if (!found) {
+    console.log(`   ❌ Could not click article`);
+    return false;
+  }
+
   await page.waitForLoadState('networkidle');
 
   // Update title field
-  console.log("  Updating title...");
+  console.log("   Updating title...");
   const titleField = "#ctl00_MainContent_TbTitle";
   try {
     const el = await page.$(titleField);
     if (el) {
       await page.click(titleField, { clickCount: 3 });
       await page.press(titleField, "Backspace");
-      await page.type(titleField, title);
-      console.log(`    ✅ Title: ${title}`);
+      await page.type(titleField, newTitle);
+      console.log(`     ✅ Title: ${newTitle}`);
     } else {
-      console.log(`    ❌ Title field not found`);
+      console.log(`     ❌ Title field not found`);
+      return false;
     }
   } catch (e) {
-    console.log(`    ❌ Error updating title: ${e.message}`);
+    console.log(`     ❌ Error: ${e.message}`);
+    return false;
   }
 
   // Update meta field
-  console.log("  Updating meta description...");
+  console.log("   Updating meta description...");
   const metaField = "#ctl00_MainContent_TbMetaDescription";
   try {
     const el = await page.$(metaField);
     if (el) {
       await page.click(metaField, { clickCount: 3 });
       await page.press(metaField, "Backspace");
-      await page.type(metaField, meta);
-      console.log(`    ✅ Meta: ${meta.substring(0, 50)}...`);
+      await page.type(metaField, newMeta);
+      console.log(`     ✅ Meta: ${newMeta.substring(0, 50)}...`);
     } else {
-      console.log(`    ❌ Meta field not found`);
+      console.log(`     ❌ Meta field not found`);
     }
   } catch (e) {
-    console.log(`    ❌ Error updating meta: ${e.message}`);
+    console.log(`     ❌ Error: ${e.message}`);
   }
 
   // Save
   if (!DRY_RUN) {
-    console.log("  Saving article...");
+    console.log("   Saving article...");
     try {
       await Promise.all([
         page.waitForNavigation({ waitUntil: 'networkidle', timeout: 15000 }).catch(() => { }),
         page.click("#ctl00_MainContent_BtnSave"),
       ]);
-      console.log("  ✅ Article saved!");
+      console.log("   ✅ Article saved!");
       return true;
     } catch (e) {
-      console.log(`  ❌ Error saving: ${e.message}`);
+      console.log(`   ❌ Error saving: ${e.message}`);
       return false;
     }
   } else {
-    console.log("  (DRY-RUN mode: not saving)");
+    console.log("   (DRY-RUN: not saving)");
     return true;
   }
 }
@@ -220,9 +217,9 @@ async function main() {
     // Update keywords
     let success = 0;
     for (const item of toUpdate) {
-      const result = await updateKeyword(page, item.keyword, item.title, item.meta);
+      const result = await updateKeyword(page, item.keyword, item.article, item.title, item.meta);
       if (result) success++;
-      await page.waitForTimeout(2000); // Pause between updates
+      await page.waitForTimeout(2000);
     }
 
     console.log('\n' + '='.repeat(80));
@@ -230,7 +227,7 @@ async function main() {
     console.log('='.repeat(80));
 
     if (!DRY_RUN) {
-      console.log('\n⏱️  Wait 2-3 dage for Google to crawl and update rankings');
+      console.log('\n⏱️  Wait 2-3 dage for Google to crawl');
       console.log('📊 Check GSC: https://search.google.com/search-console\n');
     }
 
