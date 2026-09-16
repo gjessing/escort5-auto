@@ -35,9 +35,15 @@ function positionsFaktor(position) {
   if (position <= 20) return 1.5;   // side 2 – størst upside
   return 0.6;
 }
-function beregnScore(row) {
+function beregnScore(row, ga4Ord = new Set()) {
   const efterspoergsel = Math.log10(row.impressions + 1); // dæmper mega-termer
-  return Math.round(efterspoergsel * positionsFaktor(row.position) * langhaleFaktor(row.keys[0]) * 100);
+  let score = Math.round(efterspoergsel * positionsFaktor(row.position) * langhaleFaktor(row.keys[0]) * 100);
+  if (harGA4Match(row.keys[0], ga4Ord)) score = Math.round(score * 1.3); // bonus: ligner indhold der performer godt paa sitet
+  return score;
+}
+function harGA4Match(sogeord, ga4Ord) {
+  if (!ga4Ord || ga4Ord.size === 0) return false;
+  return sogeord.toLowerCase().split(/\s+/).some((ord) => ga4Ord.has(ord));
 }
 function normaliser(sogeord) {
   return sogeord.toLowerCase().trim().split(/\s+/).sort().join(' ');
@@ -49,6 +55,7 @@ import { chromium } from 'playwright';
 import fetch from 'node-fetch';
 import minimist from 'minimist';
 import { assertRequiredEnv, parsePositiveInt } from './security.js';
+import { hentGA4LandingSider, udtraekOrdFraUrl } from './ga4.js';
 
 const args = minimist(process.argv.slice(2));
 const ANTAL   = parsePositiveInt(args.antal, 'antal', 1);
@@ -63,7 +70,7 @@ const { LOGIN_URL, ADMIN_URL, USERNAME, PASSWORD, ANTHROPIC_API_KEY } = process.
 assertRequiredEnv(['LOGIN_URL', 'ADMIN_URL', 'USERNAME', 'PASSWORD', 'ANTHROPIC_API_KEY']);
 
 // ── Hent top sogeord fra Search Console ───────────────────────────────────────
-async function hentTopSogeord(antal, dage) {
+async function hentTopSogeord(antal, dage, ga4Ord = new Set()) {
   console.log('\nHenter sogeord fra Search Console...');
 
   const credentialsPath = process.env.GOOGLE_CREDENTIALS;
@@ -96,7 +103,7 @@ const rows = res.data.rows || [];
 const setValgt = new Set();
 const muligheder = rows
   .filter(r => r.impressions >= 30 && r.position > 3 && !daekkede.has(normaliser(r.keys[0])))
-  .map(r => ({ row: r, score: beregnScore(r) }))
+  .map(r => ({ row: r, score: beregnScore(r, ga4Ord) }))
   .sort((a, b) => b.score - a.score)
   .filter(x => {
     const nf = normaliser(x.row.keys[0]);
@@ -111,7 +118,8 @@ const muligheder = rows
 
   console.log('  Fandt ' + muligheder.length + ' sogeord (mulighedsscore):');
   muligheder.forEach((r, i) => {
-    console.log('  ' + (i+1) + '. "' + r.keys[0] + '" (' + Math.round(r.impressions) + ' visn., pos ' + r.position.toFixed(1) + ', score ' + beregnScore(r) + ')');
+    const boost = harGA4Match(r.keys[0], ga4Ord) ? ' [GA4-match]' : '';
+    console.log('  ' + (i+1) + '. "' + r.keys[0] + '" (' + Math.round(r.impressions) + ' visn., pos ' + r.position.toFixed(1) + ', score ' + beregnScore(r, ga4Ord) + boost + ')');
   });
 
   return muligheder.map(r => r.keys[0]);
@@ -317,7 +325,23 @@ async function postArtikel(artikel) {
 // ── Main ──────────────────────────────────────────────────────────────────────
 (async () => {
   try {
-    const sogeord = await hentTopSogeord(ANTAL, DAGE);
+    let ga4Ord = new Set();
+    if (process.env.GOOGLE_ANALYTICS_PROPERTY_ID) {
+      try {
+        console.log('\nHenter GA4-landingssider (organisk trafik)...');
+        const ga4Sider = await hentGA4LandingSider({
+          credentialsPath: process.env.GOOGLE_CREDENTIALS,
+          propertyId: process.env.GOOGLE_ANALYTICS_PROPERTY_ID,
+          dage: DAGE,
+        });
+        ga4Sider.forEach((s) => udtraekOrdFraUrl(s.landingPage).forEach((w) => ga4Ord.add(w)));
+        console.log('  OK: ' + ga4Sider.length + ' godt-performende organiske sider fundet -> ' + ga4Ord.size + ' emne-ord til score-bonus');
+      } catch (err) {
+        console.log('  Advarsel: GA4 kunne ikke hentes (' + err.message + ') - fortsaetter uden GA4-bonus.');
+      }
+    }
+
+    const sogeord = await hentTopSogeord(ANTAL, DAGE, ga4Ord);
     for (const s of sogeord) {
       console.log('\n' + '='.repeat(50));
       console.log('Behandler: "' + s + '"');

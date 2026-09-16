@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import TelegramBot from 'node-telegram-bot-api';
 import Anthropic from '@anthropic-ai/sdk';
+import cron from 'node-cron';
 import { exec } from 'child_process';
 
 const bot = new TelegramBot(process.env.TELEGRAM_TOKEN, { polling: true });
@@ -8,6 +9,53 @@ const claude = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const ARBEJDSMAPPE = '/home/hjemme/escort5-auto';
 const SITE_NAVN = 'escort5.dk';
+
+// ── Autopilot: planlagt automatisk artikel-generering ─────────────────────
+// Kraever ingen ekstra opsaetning for at koere, men for at faa en Telegram-
+// besked naar den er faerdig skal TELEGRAM_CHAT_ID saettes i .env (brug
+// /chatid kommandoen i botten for at finde dit chat-id).
+const AUTO_ENABLED = process.env.AUTO_ENABLED !== 'false';
+const AUTO_CRON = process.env.AUTO_CRON || '0 8 * * *'; // default: hver dag kl. 08:00
+const AUTO_ANTAL = process.env.AUTO_ANTAL || '1';
+const OWNER_CHAT_ID = process.env.TELEGRAM_CHAT_ID || null;
+
+function koerAutopilot(triggerChatId) {
+  const modtager = triggerChatId || OWNER_CHAT_ID;
+  const ga4Tekst = process.env.GOOGLE_ANALYTICS_PROPERTY_ID ? ' + GA4-bonus' : '';
+
+  if (modtager) {
+    bot.sendMessage(modtager, `🤖 Autopilot starter: henter søgeord fra Search Console${ga4Tekst} og forsøger at generere ${AUTO_ANTAL} artikel(er)...`);
+  } else {
+    console.log('Autopilot: ingen TELEGRAM_CHAT_ID sat - koerer stille (ingen Telegram-besked).');
+  }
+
+  exec(
+    `cd ${ARBEJDSMAPPE} && node auto.js --antal ${AUTO_ANTAL} --headless`,
+    { timeout: 10 * 60 * 1000 },
+    (error, stdout, stderr) => {
+      console.log('[autopilot] ' + (stdout || '') + (stderr || ''));
+      if (!modtager) return;
+      if (error) {
+        bot.sendMessage(modtager, `❌ Autopilot fejlede: ${error.message}
+
+${(stderr || stdout || '').slice(0, 500)}`);
+      } else {
+        const sidsteLinjer = stdout.trim().split('\n').slice(-10).join('\n');
+        bot.sendMessage(modtager, `✅ Autopilot faerdig!
+\`\`\`
+${sidsteLinjer.slice(0, 1200)}
+\`\`\``, { parse_mode: 'Markdown' });
+      }
+    }
+  );
+}
+
+if (AUTO_ENABLED) {
+  cron.schedule(AUTO_CRON, () => koerAutopilot(), { timezone: 'Europe/Copenhagen' });
+  console.log(`⏰ Autopilot planlagt: "${AUTO_CRON}" (Europe/Copenhagen)${OWNER_CHAT_ID ? '' : ' - OBS: TELEGRAM_CHAT_ID mangler, saa der sendes ingen beskeder'}`);
+} else {
+  console.log('⏸️  Autopilot er slaaet fra (AUTO_ENABLED=false i .env)');
+}
 
 // Sessions til dialog flows
 const sessions = {};
@@ -59,6 +107,22 @@ bot.onText(/\/status/, (msg) => {
   bot.sendMessage(msg.chat.id, `✅ Hjemme server kører fint!\n🌐 Site: ${SITE_NAVN}`);
 });
 
+// ── /chatid ──────────────────────────────────────────────
+bot.onText(/\/chatid/, (msg) => {
+  bot.sendMessage(msg.chat.id, `Dit chat-id er: \`${msg.chat.id}\`\n\nSæt det som TELEGRAM_CHAT_ID i .env for at få automatiske autopilot-beskeder.`, { parse_mode: 'Markdown' });
+});
+
+// ── /autopilot_nu ────────────────────────────────────────
+bot.onText(/\/autopilot_nu/, (msg) => {
+  koerAutopilot(msg.chat.id);
+});
+
+// ── /autopilot_status ────────────────────────────────────
+bot.onText(/\/autopilot_status/, (msg) => {
+  const ga4 = process.env.GOOGLE_ANALYTICS_PROPERTY_ID ? '✅ GA4 tilkoblet' : '➖ GA4 ikke sat op (kun Search Console)';
+  bot.sendMessage(msg.chat.id, `🤖 *Autopilot*\nStatus: ${AUTO_ENABLED ? '✅ Aktiv' : '⏸️ Slaaet fra'}\nPlan: \`${AUTO_CRON}\` (Europe/Copenhagen)\nAntal pr. koersel: ${AUTO_ANTAL}\nBeskeder til: ${OWNER_CHAT_ID ? OWNER_CHAT_ID : 'ingen (TELEGRAM_CHAT_ID mangler)'}\n${ga4}`, { parse_mode: 'Markdown' });
+});
+
 // ── /help ────────────────────────────────────────────────
 bot.onText(/\/hjaelp|\/hjælp|\/help/, (msg) => {
   bot.sendMessage(msg.chat.id, `📋 *Tilgængelige kommandoer:*
@@ -66,6 +130,11 @@ bot.onText(/\/hjaelp|\/hjælp|\/help/, (msg) => {
 📝 *Artikler*
 /artikel - Generer og publicer artikel
 /manglende - Find byer der mangler artikler
+
+🤖 *Autopilot*
+/autopilot_nu - Kør autopilot med det samme
+/autopilot_status - Se om autopilot er aktiv og hvornår den kører
+/chatid - Find dit chat-id (til TELEGRAM_CHAT_ID i .env)
 
 🖼️ *Billeder*
 /billede - Hent billeder fra en URL
