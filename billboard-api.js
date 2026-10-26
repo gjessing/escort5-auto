@@ -75,7 +75,8 @@ export async function opretArtikelViaApi({ artikel, emne, sprog, blog, billedeSt
   form.append('topic', JSON.stringify(topic));
   if (billedeSti) {
     const bytes = fs.readFileSync(billedeSti);
-    form.append('picture', new Blob([bytes]), path.basename(billedeSti));
+    const billedType = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp' }[path.extname(billedeSti).toLowerCase()];
+    form.append('picture', new Blob([bytes], { type: billedType }), path.basename(billedeSti));
   }
 
   const res = await fetch(apiUrl(''), { method: 'POST', headers: apiHeaders(), body: form });
