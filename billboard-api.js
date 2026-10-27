@@ -17,7 +17,7 @@ function lavSlug(tekst) {
 
 function apiUrl(sti) {
   const site = process.env.SITE_URL || 'https://escort5.dk/';
-  return new URL('/api/v1/topics' + sti, site);
+  return new URL('/api/ext/v1/topics' + sti, site);
 }
 
 function apiHeaders() {
