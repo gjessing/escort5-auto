@@ -2,17 +2,15 @@
 // Brug: node artikel.js --by "Kobenhavn" --emne "escort guide"
 
 import 'dotenv/config';
-import { chromium } from 'playwright';
 import fetch from 'node-fetch';
 import minimist from 'minimist';
 import { assertRequiredEnv } from './security.js';
+import { opretArtikelViaApi } from './billboard-api.js';
 
 const args = minimist(process.argv.slice(2));
 const BY      = args.by   || args.b || null;
 const EMNE    = args.emne || args.e || null;
 const EXTRA   = args.extra || '';
-const erLinuxServer = process.platform === 'linux' && !process.env.DISPLAY;
-const HEADLESS = args.headless === true || erLinuxServer;
 const BLOG = args.blog === true;
 
 if (!BY || !EMNE) {
@@ -58,8 +56,8 @@ async function hentBillede(by, emne) {
   console.log('  Advarsel: Ingen billeder fundet i billeder/ mappen');
   return null;
 }
-const { LOGIN_URL, ADMIN_URL, USERNAME, PASSWORD, ANTHROPIC_API_KEY } = process.env;
-assertRequiredEnv(['LOGIN_URL', 'ADMIN_URL', 'USERNAME', 'PASSWORD', 'ANTHROPIC_API_KEY']);
+const { ANTHROPIC_API_KEY } = process.env;
+assertRequiredEnv(['ANTHROPIC_API_KEY']);
 
 async function genererArtikel(by, emne, extra) {
   console.log('\nGenererer artikel om "' + emne + '" i ' + by + '...');
@@ -128,159 +126,10 @@ Returner KUN et rent JSON-objekt (ingen markdown, ingen backticks):
 }
 
 async function postArtikel(artikel) {
-  console.log('\nStarter browser...');
-  const browser = await chromium.launch({ headless: HEADLESS, slowMo: 60 });
-  const page = await browser.newPage();
-
-  // Login
-  console.log('Logger ind...');
-  await page.goto(LOGIN_URL, { waitUntil: 'networkidle' });
-
-  // Accepter cookies hvis banner vises
-  const cookieBtn = page.locator('#cbConfirm');
-  if (await cookieBtn.count() > 0) {
-    await cookieBtn.click();
-    await page.waitForTimeout(500);
-    console.log('  OK: Cookies accepteret');
-  }
-
-  await page.click('#ctl00_MainContent_LfLogin_LoginMain_UserName', { clickCount: 3 });
-  await page.keyboard.press('Backspace');
-  await page.type('#ctl00_MainContent_LfLogin_LoginMain_UserName', USERNAME, { delay: 60 });
-
-  await page.click('#ctl00_MainContent_LfLogin_LoginMain_Password', { clickCount: 3 });
-  await page.keyboard.press('Backspace');
-  await page.type('#ctl00_MainContent_LfLogin_LoginMain_Password', PASSWORD, { delay: 60 });
-
-  await Promise.all([
-    page.waitForNavigation({ waitUntil: 'networkidle', timeout: 10000 }).catch(() => {}),
-    page.click('#ctl00_MainContent_LfLogin_LoginMain_BtnLogin'),
-  ]);
-
-  await page.waitForLoadState('networkidle');
-  const urlEfterLogin = page.url();
-
-  if (urlEfterLogin.toLowerCase().includes('login')) {
-    throw new Error('Login fejlede - tjek brugernavn/adgangskode i .env');
-  }
-  console.log('  OK: Login lykkedes!');
-
-  // Trin 1: Opret ny artikel
-  console.log('\nTrin 1: Opretter ny artikel...');
-  await page.goto(ADMIN_URL, { waitUntil: 'networkidle' });
-
-  const baseSlug = ((artikel.by || BY || '') + '-' + (artikel.emne || EMNE || ''))
-    .replace(/æ/g, 'ae').replace(/Æ/g, 'ae')
-    .replace(/ø/g, 'oe').replace(/Ø/g, 'oe')
-    .replace(/å/g, 'aa').replace(/Å/g, 'aa')
-    .replace(/ä/g, 'ae').replace(/Ä/g, 'ae')
-    .replace(/ö/g, 'oe').replace(/Ö/g, 'oe')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '');
-
-  // Find eksisterende slugs paa siden og find naeste ledige nummer
-  const eksisterendeSlugs = await page.evaluate(() => {
-    const items = document.querySelectorAll('.rlItem, .rcbItem, li, td, .list-item');
-    return Array.from(items).map(el => el.textContent.trim().toLowerCase().replace(/\s+/g, '-'));
-  });
-
-  let slug = baseSlug;
-  let nr = 2;
-  while (eksisterendeSlugs.some(s => s.includes(baseSlug))) {
-    // Tjek om der er en eksakt match - ellers brug base slug
-    if (!eksisterendeSlugs.includes(slug)) break;
-    slug = baseSlug + '-' + nr;
-    nr++;
-  }
-  console.log('  Slug: ' + slug);
-
-  // Klik Blog-knap hvis --blog flag er sat
-  if (BLOG) {
-    const blogKnap = page.locator('#ctl00_MainContent_RblTopicCategory_ctl03');
-    if (await blogKnap.count() > 0) {
-      await blogKnap.click();
-      await page.waitForTimeout(800);
-      console.log('  OK: Blog valgt');
-    }
-  }
-
-  await page.click('#ctl00_MainContent_LbTopics_Footer_TbNewTopic', { clickCount: 3 });
-  await page.keyboard.press('Backspace');
-  await page.type('#ctl00_MainContent_LbTopics_Footer_TbNewTopic', slug, { delay: 40 });
-
-  await Promise.all([
-    page.waitForNavigation({ waitUntil: 'networkidle', timeout: 15000 }),
-    page.click('#ctl00_MainContent_LbTopics_Footer_BtnAddTopic'),
-  ]);
-  console.log('  OK: Ny artikel oprettet! URL: ' + page.url());
-
-  // Trin 2: Udfyld felter
-  console.log('\nTrin 2: Udfylder felter...');
-
-  async function udfyld(id, vaerdi, label) {
-    const el = page.locator('#' + id);
-    if (await el.count() > 0) {
-      await el.click({ clickCount: 3 });
-      await page.keyboard.press('Backspace');
-      await el.fill(vaerdi);
-      console.log('  OK: ' + label);
-    } else {
-      console.log('  Advarsel: Felt ikke fundet: ' + id + ' (' + label + ')');
-    }
-  }
-
-  await udfyld('ctl00_MainContent_TbImageText',       artikel.imageText, 'Billede-tekst');
-  await udfyld('ctl00_MainContent_TbTitle',           artikel.title,     'Titel');
-  await udfyld('ctl00_MainContent_TbIntro',           artikel.intro,     'Intro');
-  await udfyld('ctl00_MainContent_TbMetaDescription', artikel.meta,      'Meta');
-
-  // Brodtekst via Telerik
-  const bodyEl = page.locator('#ctl00_MainContent_EdtBodyContentHiddenTextarea');
-  if (await bodyEl.count() > 0) {
-    await page.evaluate(function(args) {
-      var el = document.getElementById(args.id);
-      if (el) {
-        el.value = args.html;
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-      }
-      document.querySelectorAll('.RadEditor').forEach(function(e) {
-        try { if (e.control) e.control.set_html(args.html); } catch(_) {}
-      });
-    }, { id: 'ctl00_MainContent_EdtBodyContentHiddenTextarea', html: artikel.body });
-    console.log('  OK: Brodtekst');
-  } else {
-    console.log('  Advarsel: Brodtekst felt ikke fundet');
-  }
-
-
-  // Upload billede
+  console.log('\nOpretter artikel via Billboard API...');
   const billedeSti = await hentBillede(BY, EMNE);
-  if (billedeSti) {
-    const uploadFelt = page.locator('#ctl00_MainContent_AuImagefile0');
-    if (await uploadFelt.count() > 0) {
-      await uploadFelt.setInputFiles(billedeSti);
-      await page.waitForTimeout(1000);
-      console.log('  OK: Billede uploadet');
-    } else {
-      console.log('  Advarsel: Upload felt ikke fundet');
-    }
-  }
-
-  // Klik Gem
-  console.log('\nGemmer artikel...');
-  await Promise.all([
-    page.waitForNavigation({ waitUntil: 'networkidle', timeout: 15000 }).catch(() => {}),
-    page.click('#ctl00_MainContent_BtnSave'),
-  ]);
-  console.log('  OK: Artikel gemt! URL: ' + page.url());
-
-  await page.screenshot({ path: 'screenshot.png' });
-  console.log('\nScreenshot gemt: screenshot.png');
-  console.log('Lukker browseren automatisk om 5 sekunder.\n');
-
-  await page.waitForTimeout(5000);
-  await browser.close();
+  const link = await opretArtikelViaApi({ artikel, emne: EMNE, sprog: 'da', blog: BLOG, billedeSti });
+  console.log('  OK: Artikel oprettet som kladde: ' + link);
 }
 
 (async () => {

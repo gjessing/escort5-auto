@@ -51,23 +51,20 @@ function normaliser(sogeord) {
 
 import 'dotenv/config';
 import { google } from 'googleapis';
-import { chromium } from 'playwright';
 import fetch from 'node-fetch';
 import minimist from 'minimist';
 import { assertRequiredEnv, parsePositiveInt } from './security.js';
 import { hentGA4LandingSider, udtraekOrdFraUrl } from './ga4.js';
+import { opretArtikelViaApi } from './billboard-api.js';
 
 const args = minimist(process.argv.slice(2));
 const ANTAL   = parsePositiveInt(args.antal, 'antal', 1);
 const DAGE    = parsePositiveInt(args.dage, 'dage', 90);
-// Auto-detekter Linux-server uden DISPLAY (ingen XServer) -> tving headless
-const erLinuxServer = process.platform === 'linux' && !process.env.DISPLAY;
-const HEADLESS = args.headless === true || erLinuxServer;
 const BLOG = args.blog === true;
 const SITE    = process.env.SITE_URL || 'https://escort5.dk/';
 
-const { LOGIN_URL, ADMIN_URL, USERNAME, PASSWORD, ANTHROPIC_API_KEY } = process.env;
-assertRequiredEnv(['LOGIN_URL', 'ADMIN_URL', 'USERNAME', 'PASSWORD', 'ANTHROPIC_API_KEY']);
+const { ANTHROPIC_API_KEY } = process.env;
+assertRequiredEnv(['ANTHROPIC_API_KEY']);
 
 // ── Hent top sogeord fra Search Console ───────────────────────────────────────
 async function hentTopSogeord(antal, dage, ga4Ord = new Set()) {
@@ -219,107 +216,12 @@ async function hentBillede(by, emne) {
   return null;
 }
 
-// ── Post artikel via Playwright ────────────────────────────────────────────────
-async function postArtikel(artikel) {
-  const browser = await chromium.launch({ headless: HEADLESS, slowMo: 60 });
-  const page = await browser.newPage();
-
-  // Login
-  await page.goto(LOGIN_URL, { waitUntil: 'networkidle' });
-  const cookieBtn = page.locator('#cbConfirm');
-  if (await cookieBtn.count() > 0) { await cookieBtn.click(); await page.waitForTimeout(500); }
-
-  await page.click('#ctl00_MainContent_LfLogin_LoginMain_UserName', { clickCount: 3 });
-  await page.keyboard.press('Backspace');
-  await page.type('#ctl00_MainContent_LfLogin_LoginMain_UserName', USERNAME, { delay: 60 });
-  await page.click('#ctl00_MainContent_LfLogin_LoginMain_Password', { clickCount: 3 });
-  await page.keyboard.press('Backspace');
-  await page.type('#ctl00_MainContent_LfLogin_LoginMain_Password', PASSWORD, { delay: 60 });
-
-  await Promise.all([
-    page.waitForNavigation({ waitUntil: 'networkidle', timeout: 10000 }).catch(() => {}),
-    page.click('#ctl00_MainContent_LfLogin_LoginMain_BtnLogin'),
-  ]);
-  await page.waitForLoadState('networkidle');
-  if (page.url().toLowerCase().includes('login')) throw new Error('Login fejlede');
-  console.log('  OK: Logget ind');
-
-  // Opret artikel
-  await page.goto(ADMIN_URL, { waitUntil: 'networkidle' });
-  const baseSlug = ((artikel.by || '') + '-' + artikel.emne)
-    .toLowerCase()
-    .replace(/æ/g, 'ae').replace(/ø/g, 'oe').replace(/å/g, 'aa')
-    .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-
-  // Find eksisterende slugs og find naeste ledige nummer
-  const eksisterendeSlugs = await page.evaluate(() => {
-    return Array.from(document.querySelectorAll('.rlItem, .rcbItem, li, td, a'))
-      .map(el => el.textContent.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''));
-  });
-
-  let slug = baseSlug;
-  let slugNr = 2;
-  while (eksisterendeSlugs.includes(slug)) {
-    slug = baseSlug + '-' + slugNr;
-    slugNr++;
-  }
-
-  // Klik Blog-knap hvis --blog flag er sat
-  if (BLOG) {
-    const blogKnap = page.locator('#ctl00_MainContent_RblTopicCategory_ctl03');
-    if (await blogKnap.count() > 0) {
-      await blogKnap.click();
-      await page.waitForTimeout(800);
-      console.log('  OK: Blog valgt');
-    }
-  }
-
-  await page.click('#ctl00_MainContent_LbTopics_Footer_TbNewTopic', { clickCount: 3 });
-  await page.keyboard.press('Backspace');
-  await page.type('#ctl00_MainContent_LbTopics_Footer_TbNewTopic', slug, { delay: 40 });
-  await Promise.all([
-    page.waitForNavigation({ waitUntil: 'networkidle', timeout: 15000 }),
-    page.click('#ctl00_MainContent_LbTopics_Footer_BtnAddTopic'),
-  ]);
-  console.log('  OK: Artikel oprettet: ' + slug);
-
-  // Udfyld felter
-  async function udfyld(id, val, label) {
-    const el = page.locator('#' + id);
-    if (await el.count() > 0) { await el.click({ clickCount: 3 }); await page.keyboard.press('Backspace'); await el.fill(val); console.log('  OK: ' + label); }
-    else console.log('  Advarsel: ' + label + ' felt ikke fundet');
-  }
-
-  await udfyld('ctl00_MainContent_TbImageText',       artikel.imageText, 'Billede-tekst');
-  await udfyld('ctl00_MainContent_TbTitle',           artikel.title,     'Titel');
-  await udfyld('ctl00_MainContent_TbIntro',           artikel.intro,     'Intro');
-  await udfyld('ctl00_MainContent_TbMetaDescription', artikel.meta,      'Meta');
-
-  await page.evaluate(function(args) {
-    var el = document.getElementById(args.id);
-    if (el) { el.value = args.html; el.dispatchEvent(new Event('change', { bubbles: true })); }
-    document.querySelectorAll('.RadEditor').forEach(function(e) { try { if (e.control) e.control.set_html(args.html); } catch(_) {} });
-  }, { id: 'ctl00_MainContent_EdtBodyContentHiddenTextarea', html: artikel.body });
-  console.log('  OK: Brodtekst');
-
-  // Billede
-  const billedeSti = await hentBillede(artikel.by || '', artikel.emne);
-  if (billedeSti) {
-    const uploadFelt = page.locator('#ctl00_MainContent_AuImagefile0');
-    if (await uploadFelt.count() > 0) {
-      await uploadFelt.setInputFiles(billedeSti);
-      await page.waitForTimeout(1000);
-      console.log('  OK: Billede uploadet');
-    }
-  }
-
-  // Gem
-  await Promise.all([
-    page.waitForNavigation({ waitUntil: 'networkidle', timeout: 15000 }).catch(() => {}),
-    page.click('#ctl00_MainContent_BtnSave'),
-  ]);
-  console.log('  OK: Gemt! URL: ' + page.url());
-  await browser.close();
+// ── Post artikel via Billboard API ────────────────────────────────────────────
+async function postArtikel(artikel, sogeord) {
+  const sprog = (SITE || '').includes('.se') ? 'sv' : 'da';
+  const billedeSti = await hentBillede('', sogeord);
+  const link = await opretArtikelViaApi({ artikel, emne: sogeord, sprog, blog: BLOG, billedeSti });
+  console.log('  OK: Artikel oprettet som kladde: ' + link);
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -347,7 +249,7 @@ async function postArtikel(artikel) {
       console.log('Behandler: "' + s + '"');
       console.log('='.repeat(50));
       const artikel = await genererArtikel(s);
-      await postArtikel(artikel);
+      await postArtikel(artikel, s);
       gemDaekket(s);   // husk emnet, så det ikke vælges igen
       if (sogeord.length > 1) await new Promise(r => setTimeout(r, 3000));
     }
