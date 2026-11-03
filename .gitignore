@@ -10,6 +10,7 @@ backlink-taeller.json
 screenshot.png
 coverage/
 dist/
+<<<<<<< Updated upstream
 debug-ordbog-69-efter.png
 *.png
 ret-gamle-log.json
@@ -17,3 +18,7 @@ oversaet-ordbog-log.json
 skrevne-sogeord.json
 oversaet-ordbog-log.json
 .DS_Store
+=======
+debug-ordbog-analsex-efter.png
+*.png
+>>>>>>> Stashed changes
