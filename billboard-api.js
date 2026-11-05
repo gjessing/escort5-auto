@@ -78,6 +78,7 @@ export async function opretArtikelViaApi({ artikel, emne, sprog, blog, landingss
     texts: {
       [sprog]: {
         title: artikel.title,
+        ...(kategori === 'LandingPage' ? { pageTitle: artikel.title } : {}),
         metaDescription: artikel.meta,
         intro: artikel.intro,
         body: artikel.body,
