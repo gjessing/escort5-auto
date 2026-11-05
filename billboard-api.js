@@ -38,7 +38,7 @@ async function hentTopics(kategori) {
 
 // Alle artikler og blogs i Billboard, så autopiloten kan springe emner over, der allerede er skrevet om.
 export async function hentEksisterendeEmner() {
-  const topics = [...await hentTopics('Article'), ...await hentTopics('Blog')];
+  const topics = [...await hentTopics('Article'), ...await hentTopics('Blog'), ...await hentTopics('LandingPage')];
   return topics.map(t => ({ topicId: t.topicId, titler: Object.values(t.titles || {}) }));
 }
 
@@ -49,22 +49,32 @@ async function ledigTopicId(kategori, baseSlug) {
   return baseSlug;
 }
 
+// Landingssider filtrerer annoncer på køn, region og kategori. Felterne sendes kun når Claude har valgt dem.
+function landingFilter(artikel) {
+  const filter = {};
+  if (artikel.gender) filter.gender = artikel.gender;
+  if (Array.isArray(artikel.regions) && artikel.regions.length) filter.regions = artikel.regions;
+  if (Array.isArray(artikel.categories) && artikel.categories.length) filter.categories = artikel.categories;
+  return filter;
+}
+
 /**
- * Opretter en artikel (eller blog) som ikke-publiceret kladde.
+ * Opretter en artikel, blog eller landingsside som ikke-publiceret kladde.
  * artikel: { imageText, title, intro, body, meta } fra Claude
  * sprog: 'da' eller 'sv' (sitets sprog)
  * billedeSti: valgfri sti til et billede der sendes med kaldet
  * Returnerer adressen (link) på den oprettede side.
  */
-export async function opretArtikelViaApi({ artikel, emne, sprog, blog, billedeSti }) {
+export async function opretArtikelViaApi({ artikel, emne, sprog, blog, landingsside, billedeSti }) {
   assertRequiredEnv(['BILLBOARD_API_KEY']);
 
-  const kategori = blog ? 'Blog' : 'Article';
+  const kategori = landingsside ? 'LandingPage' : blog ? 'Blog' : 'Article';
   const topicId = await ledigTopicId(kategori, lavSlug(emne));
 
   const topic = {
     category: kategori,
     topicId,
+    ...(kategori === 'LandingPage' ? landingFilter(artikel) : {}),
     texts: {
       [sprog]: {
         title: artikel.title,

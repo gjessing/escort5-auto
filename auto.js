@@ -85,6 +85,19 @@ const SITE    = process.env.SITE_URL || 'https://escort5.dk/';
 const { ANTHROPIC_API_KEY } = process.env;
 assertRequiredEnv(['ANTHROPIC_API_KEY']);
 
+// Landingssider: Claude vælger køn/region/kategori. Kun gyldige værdier sendes med.
+const GYLDIGE_REGIONER = ['Copenhagen', 'NorthZealand', 'TheRestOfZealand', 'Lolland', 'NorthJutland', 'Aarhus', 'MiddleAndWestJutland', 'SouthernJutland', 'Fyn', 'Bornholm'];
+const GYLDIGE_KATEGORIER = ['Escort', 'Massage', 'Strip', 'TantricMassage'];
+const GYLDIGT_KOEN = ['Female', 'Male', 'Couple'];
+
+function sanerLanding(artikel) {
+  if (!['artikel', 'landingsside', 'ingen'].includes(artikel.type)) artikel.type = 'artikel';
+  if (artikel.type !== 'landingsside') return;
+  if (!GYLDIGT_KOEN.includes(artikel.gender)) delete artikel.gender;
+  artikel.regions = (artikel.regions || []).filter(r => GYLDIGE_REGIONER.includes(r));
+  artikel.categories = (artikel.categories || []).filter(c => GYLDIGE_KATEGORIER.includes(c));
+}
+
 // ── Hent top sogeord fra Search Console ───────────────────────────────────────
 async function hentTopSogeord(antal, dage, ga4Ord = new Set()) {
   console.log('\nHenter sogeord fra Search Console...');
@@ -165,8 +178,18 @@ Returner KUN et rent JSON-objekt:
   "title": "SEO-titel ca. 55-60 tegn paa ${sprog}",
   "intro": "introtekst MAX 256 tegn paa ${sprog}",
   "body": "brodtekst 400-600 ord med h2 h3 og p HTML-tags, naturligt ${sprog}",
-  "meta": "meta-beskrivelse 140-160 tegn paa ${sprog}"
-}`;
+  "meta": "meta-beskrivelse 140-160 tegn paa ${sprog}",
+  "type": "artikel" eller "landingsside" eller "ingen",
+  "gender": "Female", "Male" eller "Couple" (kun ved landingsside, ellers tom streng),
+  "regions": ["regionsnavne fra listen nedenfor, kun ved landingsside"],
+  "categories": ["Escort", "Massage", "Strip" eller "TantricMassage", kun ved landingsside]
+}
+
+Vælg "type" ud fra søgeordet:
+- "landingsside" når søgeordet er en kommerciel søgning efter en by, region eller type escort, hvor læseren forventes at se annoncer (fx "escort københavn").
+- "artikel" når søgeordet er informativt (fx "hvad koster", "guide", "tips", "sådan").
+- "ingen" når emnet hverken passer som artikel eller landingsside.
+Gyldige regioner: Copenhagen, NorthZealand, TheRestOfZealand, Lolland, NorthJutland, Aarhus, MiddleAndWestJutland, SouthernJutland, Fyn, Bornholm.`;
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -197,6 +220,11 @@ Returner KUN et rent JSON-objekt:
     artikel = JSON.parse(renTekst);
   } catch {
     throw new Error('Claude API fejl: ugyldigt JSON-svar');
+  }
+  sanerLanding(artikel);
+  if (artikel.type === 'ingen') {
+    console.log('  Springer over: passer ikke som artikel eller landingsside');
+    return artikel;
   }
   const requiredFields = ['emne', 'imageText', 'title', 'intro', 'body', 'meta'];
   for (const field of requiredFields) {
@@ -241,8 +269,9 @@ async function hentBillede(by, emne) {
 async function postArtikel(artikel, sogeord) {
   const sprog = (SITE || '').includes('.se') ? 'sv' : 'da';
   const billedeSti = await hentBillede('', sogeord);
-  const link = await opretArtikelViaApi({ artikel, emne: sogeord, sprog, blog: BLOG, billedeSti });
-  console.log('  OK: Artikel oprettet som kladde: ' + link);
+  const landingsside = artikel.type === 'landingsside';
+  const link = await opretArtikelViaApi({ artikel, emne: sogeord, sprog, blog: BLOG, landingsside, billedeSti });
+  console.log('  OK: ' + (landingsside ? 'Landingsside' : 'Artikel') + ' oprettet som kladde: ' + link);
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -270,6 +299,7 @@ async function postArtikel(artikel, sogeord) {
       console.log('Behandler: "' + s + '"');
       console.log('='.repeat(50));
       const artikel = await genererArtikel(s);
+      if (artikel.type === 'ingen') { gemDaekket(s); continue; }
       await postArtikel(artikel, s);
       gemDaekket(s);   // husk emnet, så det ikke vælges igen
       if (sogeord.length > 1) await new Promise(r => setTimeout(r, 3000));
