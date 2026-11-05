@@ -45,6 +45,25 @@ function harGA4Match(sogeord, ga4Ord) {
   if (!ga4Ord || ga4Ord.size === 0) return false;
   return sogeord.toLowerCase().split(/\s+/).some((ord) => ga4Ord.has(ord));
 }
+const STOPORD = new Set(['og', 'i', 'på', 'paa', 'med', 'for', 'til', 'af', 'om', 'den', 'det', 'der', 'som', 'er', 'en', 'et', 'hvad', 'du', 'bør', 'vide', 'hvordan', 'hvorfor', 'hvilken', 'hvilke']);
+
+function ordSaet(tekst) {
+  return new Set(tekst.toLowerCase().split(/[^a-zæøåäö]+/).filter(o => o.length > 2 && !STOPORD.has(o)));
+}
+
+// Ligner søgeordet en eksisterende artikel? Mindst 2 fælles ord, og 60 % af det kortere sæt.
+function lignerEksisterende(sogeord, eksisterende) {
+  const a = ordSaet(sogeord);
+  if (a.size === 0) return false;
+  return eksisterende.some(tekst => {
+    const b = ordSaet(tekst);
+    if (b.size === 0) return false;
+    let faelles = 0;
+    for (const o of a) if (b.has(o)) faelles++;
+    return faelles >= 2 && faelles / Math.min(a.size, b.size) >= 0.6;
+  });
+}
+
 function normaliser(sogeord) {
   return sogeord.toLowerCase().trim().split(/\s+/).sort().join(' ');
 }
@@ -55,7 +74,7 @@ import fetch from 'node-fetch';
 import minimist from 'minimist';
 import { assertRequiredEnv, parsePositiveInt } from './security.js';
 import { hentGA4LandingSider, udtraekOrdFraUrl } from './ga4.js';
-import { opretArtikelViaApi } from './billboard-api.js';
+import { opretArtikelViaApi, hentEksisterendeEmner } from './billboard-api.js';
 
 const args = minimist(process.argv.slice(2));
 const ANTAL   = parsePositiveInt(args.antal, 'antal', 1);
@@ -96,10 +115,12 @@ async function hentTopSogeord(antal, dage, ga4Ord = new Set()) {
     }
   });
 const daekkede = hentDaekkede();
+const eksisterende = (await hentEksisterendeEmner()).flatMap(t => [t.topicId.replace(/-/g, ' '), ...t.titler]);
 const rows = res.data.rows || [];
 const setValgt = new Set();
 const muligheder = rows
   .filter(r => r.impressions >= 30 && r.position > 3 && !daekkede.has(normaliser(r.keys[0])))
+  .filter(r => !lignerEksisterende(r.keys[0], eksisterende))
   .map(r => ({ row: r, score: beregnScore(r, ga4Ord) }))
   .sort((a, b) => b.score - a.score)
   .filter(x => {

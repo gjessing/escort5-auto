@@ -29,19 +29,24 @@ async function fejlFra(res) {
   return new Error('Billboard API HTTP ' + res.status + ' ' + res.statusText + (tekst ? ' - ' + tekst.slice(0, 300) : ''));
 }
 
-// Finder et ledigt adresse-navn (topicId) i kategorien: emne, emne-2, emne-3 …
-async function ledigTopicId(kategori, baseSlug) {
+async function hentTopics(kategori) {
+  assertRequiredEnv(['BILLBOARD_API_KEY']);
   const res = await fetch(apiUrl('?category=' + kategori), { headers: apiHeaders() });
   if (!res.ok) throw await fejlFra(res);
-  const eksisterende = new Set((await res.json()).map(t => t.topicId));
+  return res.json();
+}
 
-  let slug = baseSlug;
-  let nr = 2;
-  while (eksisterende.has(slug)) {
-    slug = baseSlug + '-' + nr;
-    nr++;
-  }
-  return slug;
+// Alle artikler og blogs i Billboard, så autopiloten kan springe emner over, der allerede er skrevet om.
+export async function hentEksisterendeEmner() {
+  const topics = [...await hentTopics('Article'), ...await hentTopics('Blog')];
+  return topics.map(t => ({ topicId: t.topicId, titler: Object.values(t.titles || {}) }));
+}
+
+// Stopper hvis adressen (topicId) allerede findes i kategorien – laver ingen -2-kopier.
+async function ledigTopicId(kategori, baseSlug) {
+  const eksisterende = new Set((await hentTopics(kategori)).map(t => t.topicId));
+  if (eksisterende.has(baseSlug)) throw new Error('Emnet findes allerede i Billboard: ' + baseSlug);
+  return baseSlug;
 }
 
 /**
