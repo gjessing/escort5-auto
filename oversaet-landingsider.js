@@ -77,9 +77,10 @@ ${FELTER.map(f => f + ': ' + (kilde[f] ?? '')).join('\n')}`;
     throw new Error('Claude API fejl: ugyldigt JSON-svar');
   }
   for (const sprog of MAAL) {
-    if (!oversat[sprog] || !oversat[sprog].title || !oversat[sprog].body) {
-      throw new Error('Oversættelsen mangler titel eller body for ' + sprog);
+    if (!oversat[sprog] || !oversat[sprog].title) {
+      throw new Error('Oversættelsen mangler titel for ' + sprog);
     }
+    oversat[sprog].body = oversat[sprog].body || '';
     if (oversat[sprog].intro && oversat[sprog].intro.length > 256) {
       oversat[sprog].intro = oversat[sprog].intro.substring(0, 253) + '...';
     }
@@ -98,8 +99,8 @@ ${FELTER.map(f => f + ': ' + (kilde[f] ?? '')).join('\n')}`;
       if (gemt >= MAX) break;
       const fuld = await api('/LandingPage/' + encodeURIComponent(item.topicId));
       const kilde = fuld.texts && fuld.texts[KILDE];
-      if (!kilde || !kilde.title || !kilde.body) {
-        console.log('\nSpringer over: ' + item.topicId + ' har ingen ' + KILDE + '-titel eller brødtekst');
+      if (!kilde || !kilde.title) {
+        console.log('\nSpringer over: ' + item.topicId + ' har ingen ' + KILDE + '-titel');
         continue;
       }
 
