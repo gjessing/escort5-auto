@@ -89,6 +89,13 @@ const SITE    = process.env.SITE_URL || 'https://escort5.dk/';
 const { ANTHROPIC_API_KEY } = process.env;
 assertRequiredEnv(['ANTHROPIC_API_KEY']);
 
+// Brandet staves "escort". Retter de fejlstavede former, Claude nogle gange skriver.
+const STAVNING = [[/eskortepiger/gi, 'escortpiger'], [/eskortepige/gi, 'escortpige'], [/eskort/gi, 'escort']];
+function rettStavning(tekst) {
+  if (typeof tekst !== 'string') return tekst;
+  return STAVNING.reduce((t, [fra, til]) => t.replace(fra, m => (m[0] === m[0].toUpperCase() ? til[0].toUpperCase() + til.slice(1) : til)), tekst);
+}
+
 // Landingssider: Claude vælger køn/region/kategori. Kun gyldige værdier sendes med.
 const GYLDIGE_REGIONER = ['Copenhagen', 'NorthZealand', 'TheRestOfZealand', 'Lolland', 'NorthJutland', 'Aarhus', 'MiddleAndWestJutland', 'SouthernJutland', 'Fyn', 'Bornholm'];
 const GYLDIGE_KATEGORIER = ['Escort', 'Massage', 'Strip', 'TantricMassage'];
@@ -225,6 +232,7 @@ Gyldige regioner: Copenhagen, NorthZealand, TheRestOfZealand, Lolland, NorthJutl
   } catch {
     throw new Error('Claude API fejl: ugyldigt JSON-svar');
   }
+  for (const felt of ['title', 'intro', 'body', 'meta', 'imageText']) artikel[felt] = rettStavning(artikel[felt]);
   if (TVUNGEN_TYPE) artikel.type = TVUNGEN_TYPE;
   sanerLanding(artikel);
   if (artikel.type === 'ingen') {
