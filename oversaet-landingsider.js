@@ -98,13 +98,22 @@ ${FELTER.map(f => f + ': ' + (kilde[f] ?? '')).join('\n')}`;
       if (gemt >= MAX) break;
       const fuld = await api('/LandingPage/' + encodeURIComponent(item.topicId));
       const kilde = fuld.texts && fuld.texts[KILDE];
-      if (!kilde) continue;
+      if (!kilde || !kilde.title || !kilde.body) {
+        console.log('\nSpringer over: ' + item.topicId + ' har ingen ' + KILDE + '-titel eller brødtekst');
+        continue;
+      }
 
       const mangelSprog = MAAL.filter(s => !(fuld.texts && fuld.texts[s]));
       if (mangelSprog.length === 0) continue;
 
       console.log('\nOversætter: ' + item.topicId + ' (mangler: ' + mangelSprog.join(', ') + ')');
-      const oversat = await oversaet(kilde);
+      let oversat;
+      try {
+        oversat = await oversaet(kilde);
+      } catch (err) {
+        console.log('  Springer over: ' + err.message);
+        continue;
+      }
 
       const texts = {};
       for (const s of mangelSprog) texts[s] = oversat[s];
