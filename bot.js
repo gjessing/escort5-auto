@@ -408,7 +408,7 @@ bot.on('message', async (msg) => {
   // ── Claude AI fallback ────────────────────────────────
   try {
     const response = await claude.messages.create({
-      model: 'claude-sonnet-4-6',
+      model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5',
       max_tokens: 1024,
       messages: [{ role: 'user', content: tekst }],
       system: `Du er en hjælpsom dansk AI assistent der hjælper Søren med at administrere ${SITE_NAVN}. Svar altid kort og præcist på dansk.`

@@ -85,7 +85,7 @@ Returner KUN et rent JSON-objekt (ingen markdown, ingen backticks):
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
+      model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5',
       max_tokens: 2000,
       messages: [{ role: 'user', content: prompt }],
     }),

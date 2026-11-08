@@ -255,7 +255,7 @@ session.step = 'mappe';
   // ── Claude AI fallback ────────────────────────────────
   try {
     const response = await claude.messages.create({
-      model: 'claude-opus-4-5',
+      model: process.env.ANTHROPIC_MODEL_OPUS || 'claude-opus-5-5',
       max_tokens: 1024,
       messages: [{ role: 'user', content: tekst }],
       system: `Du er en hjælpsom dansk AI assistent der hjælper Søren med at administrere ${SITE_NAVN}.
