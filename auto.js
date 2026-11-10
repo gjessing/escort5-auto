@@ -211,7 +211,7 @@ Gyldige regioner: Copenhagen, NorthZealand, TheRestOfZealand, Lolland, NorthJutl
     },
     body: JSON.stringify({
       model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5',
-      max_tokens: 2000,
+      max_tokens: 8000,
       messages: [{ role: 'user', content: prompt }],
     }),
   });
