@@ -17,6 +17,9 @@ const SITE_NAVN = 'escort5.dk';
 const AUTO_ENABLED = process.env.AUTO_ENABLED !== 'false';
 const AUTO_CRON = process.env.AUTO_CRON || '0 8 * * *'; // default: hver dag kl. 08:00
 const AUTO_ANTAL = process.env.AUTO_ANTAL || '1';
+// AUTO_TYPE: artikel (standard), landingsside eller auto (Claude vælger typen).
+const AUTO_TYPE = ['artikel', 'landingsside', 'auto'].includes(process.env.AUTO_TYPE) ? process.env.AUTO_TYPE : 'artikel';
+const TYPE_ARG = AUTO_TYPE === 'auto' ? '' : ` --type ${AUTO_TYPE}`;
 const OWNER_CHAT_ID = process.env.TELEGRAM_CHAT_ID || null;
 
 function koerAutopilot(triggerChatId) {
@@ -30,7 +33,7 @@ function koerAutopilot(triggerChatId) {
   }
 
   exec(
-    `cd ${ARBEJDSMAPPE} && node auto.js --antal ${AUTO_ANTAL} --headless`,
+    `cd ${ARBEJDSMAPPE} && node auto.js --antal ${AUTO_ANTAL}${TYPE_ARG} --headless`,
     { timeout: 10 * 60 * 1000 },
     (error, stdout, stderr) => {
       console.log('[autopilot] ' + (stdout || '') + (stderr || ''));
